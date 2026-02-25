@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DorkNet CryptoVault</title>
+    <style>
+        /* Regroupement du CSS directement dans le HTML */
+        :root {
+            --primary: #00ff41; 
+            --bg: #0d1117;
+            --card: #161b22;
+            --text: #c9d1d9;
+            --border: #30363d;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            margin: 0;
+            padding-top: 50px;
+        }
+
+        .container {
+            background: var(--card);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            width: 90%;
+            max-width: 450px;
+            border: 1px solid var(--border);
+        }
+
+        h1 { color: var(--primary); text-align: center; font-size: 1.6rem; margin-bottom: 1.5rem; }
+        h3 { border-bottom: 1px solid var(--border); padding-bottom: 10px; font-size: 1.1rem; }
+
+        input, button {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: #0d1117;
+            color: white;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: var(--primary);
+            color: black;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            transition: 0.3s;
+        }
+
+        button:hover { background: #00cc33; transform: translateY(-1px); }
+
+        .file-list { list-style: none; padding: 0; }
+        
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: #1c2128;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+
+        .btn-download {
+            color: var(--primary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            border: 1px solid var(--primary);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .btn-download:hover { background: var(--primary); color: black; }
+        
+        .logout-link { color: #f85149; text-decoration: none; font-size: 0.9rem; float: right; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>DorkNet CryptoVault</h1>
+
+        {% if current_user.is_authenticated %}
+            <div class="user-panel">
+                <a href="/logout" class="logout-link">Déconnexion</a>
+                <p>Utilisateur: <strong>{{ current_user.username }}</strong></p>
+                
+                <section style="margin-top: 30px;">
+                    <h3>Uploader un fichier</h3>
+                    <form action="/upload" method="post" enctype="multipart/form-data">
+                        <input type="file" name="file" required>
+                        <button type="submit">🔒 Crypter & Sauvegarder</button>
+                    </form>
+                </section>
+
+                <section style="margin-top: 30px;">
+                    <h3>Coffre-fort</h3>
+                    <ul class="file-list">
+                    {% for file in files %}
+                        <li class="file-item">
+                            <span style="font-size: 0.9rem; overflow: hidden;">{{ file }}</span>
+                            <a href="{{ url_for('download', filename=file) }}" class="btn-download">Télécharger</a>
+                        </li>
+                    {% else %}
+                        <p style="font-style: italic; color: #8b949e;">Le coffre est vide.</p>
+                    {% endfor %}
+                    </ul>
+                </section>
+            </div>
+
+        {% else %}
+            <div class="auth-panel">
+                <form action="/login" method="post">
+                    <input type="text" name="username" placeholder="Nom d'utilisateur" required>
+                    <input type="password" name="password" placeholder="Mot de passe" required>
+                    <button type="submit">Se connecter</button>
+                </form>
+
+                <div style="text-align: center; margin: 20px 0; color: #8b949e;">— OU —</div>
+
+                <form action="/register" method="post">
+                    <p style="text-align:center; font-size: 0.9rem;">Créer un compte</p>
+                    <input type="text" name="username" placeholder="Choisir un pseudo" required>
+                    <input type="password" name="password" placeholder="Choisir un mot de passe" required>
+                    <button type="submit" style="background:#21262d; color:white; border: 1px solid var(--border);">S'enregistrer</button>
+                </form>
+            </div>
+        {% endif %}
+    </div>
+
+</body>
+</html>
