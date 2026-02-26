@@ -60,7 +60,7 @@ if not aes_key_hex:
     aes_key_hex = get_random_bytes(32).hex()
 ENCRYPTION_KEY = bytes.fromhex(aes_key_hex)
 
-# --- MODÈLES DE DONNÉES (OPTIMISÉS) ---
+# --- MODÈLES DE DONNÉES (OPTIMISÉS TEXT) ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -78,7 +78,35 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- FONCTIONS AUTOMATIQUES (RAPPORTS) ---
+# --- SÉCURITÉ : HEADERS HTTP ---
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+# --- FONCTIONS D'ALERTE ET AUDIT ---
+def send_critical_alert(action, details):
+    """Envoie une alerte de sécurité immédiate en haute priorité au Dr Enoch Numbi."""
+    with app.app_context():
+        try:
+            msg = Message(
+                subject=f"🚨 ALERTE SÉCURITÉ CRITIQUE : {action}",
+                recipients=[os.getenv('MAIL_USER')],
+                body=f"Attention Dr Enoch Numbi,\n\nUne violation de sécurité ou une corruption de données a été détectée sur DorkNet CryptoVault.\n\n"
+                     f"Action : {action}\n"
+                     f"Détails : {details}\n"
+                     f"Horodatage : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                     f"Veuillez inspecter le Journal d'Audit immédiatement.",
+                extra_headers={'X-Priority': '1 (Highest)', 'Importance': 'high'}
+            )
+            mail.send(msg)
+            print("📧 Alerte de sécurité critique envoyée.")
+        except Exception as e:
+            print(f"❌ Échec de l'envoi de l'alerte email : {e}")
+
 def send_audit_report():
     with app.app_context():
         try:
@@ -89,12 +117,11 @@ def send_audit_report():
             for log in logs:
                 writer.writerow([log.timestamp, log.username, log.action, log.details])
             
-            msg = Message(f"Rapport d'Audit DorkNet_CryptoVault - {datetime.now().strftime('%d/%m/%Y')}",
+            msg = Message(f"Rapport d'Audit DorkNet CryptoVault - {datetime.now().strftime('%d/%m/%Y')}",
                           recipients=[os.getenv('MAIL_USER')])
-            msg.body = "Veuillez trouver ci-joint le rapport d'audit complet de DorkNet_CryptoVault."
+            msg.body = "Veuillez trouver ci-joint le rapport d'audit périodique de DorkNet CryptoVault."
             msg.attach(f"Audit_DorkNet_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv", proxy.getvalue())
             mail.send(msg)
-            print("Rapport d'audit périodique envoyé.")
         except Exception as e:
             print(f"Erreur Scheduler : {e}")
 
@@ -102,7 +129,7 @@ if not scheduler.running:
     scheduler.add_job(id='audit_report_job', func=send_audit_report, trigger='interval', hours=48)
     scheduler.start()
 
-# --- ROUTES DE NAVIGATION ---
+# --- ROUTES DE NAVIGATION & MAINTENANCE ---
 
 @app.route('/')
 def index():
@@ -121,7 +148,6 @@ def index():
 
 @app.route('/setup_db')
 def setup_db():
-    """Réinitialisation totale pour appliquer les nouveaux formats Text"""
     try:
         db.drop_all() 
         db.create_all()
@@ -132,7 +158,6 @@ def setup_db():
 @app.route('/test_mail')
 @login_required
 def test_mail():
-    """Route de test pour valider l'envoi SMTP immédiatement"""
     send_audit_report()
     return "🚀 Tentative d'envoi du rapport d'audit lancée ! Vérifiez votre boîte mail."
 
@@ -153,7 +178,7 @@ def verify_2fa():
             flash("Code PIN invalide.", "danger")
     return render_template('2fa.html')
 
-# --- GESTION DES FICHIERS ---
+# --- GESTION DES FICHIERS & SÉCURITÉ AES ---
 
 @app.route('/upload', methods=['POST'])
 @login_required
@@ -182,11 +207,35 @@ def download_cloud(public_id):
         res = cloudinary.api.resource(public_id, resource_type="raw")
         response = requests.get(res['secure_url'])
         enc_data = response.content
+        
         nonce, tag, ciphertext = enc_data[:16], enc_data[16:32], enc_data[32:]
+        
         cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX, nonce=nonce)
+        # Vérification d'intégrité intégrée
         decrypted_data = cipher.decrypt_and_verify(ciphertext, tag)
+        
+        db.session.add(AuditLog(username=current_user.username, action="DOWNLOAD_SUCCESS", details=f"Fichier : {public_id}"))
+        db.session.commit()
+        
         return send_file(io.BytesIO(decrypted_data), as_attachment=True, download_name=public_id.replace('.enc', ''))
-    except Exception as e: flash(f"Erreur : {str(e)}", "danger"); return redirect(url_for('index'))
+
+    except ValueError:
+        # VIOLATION D'INTÉGRITÉ OU CLÉ INCORRECTE
+        error_msg = f"Échec d'intégrité sur {public_id}. Le fichier a été altéré ou la clé AES est incorrecte."
+        db.session.add(AuditLog(username=current_user.username, action="SECURITY_BREACH", details=error_msg))
+        db.session.commit()
+        
+        # Alerte immédiate email au Dr Enoch Numbi
+        send_critical_alert("SECURITY_BREACH", error_msg)
+        
+        flash("🚫 Alerte Sécurité : L'intégrité du fichier est compromise. Administrateur notifié.", "danger")
+        return redirect(url_for('index'))
+
+    except Exception as e:
+        db.session.add(AuditLog(username=current_user.username, action="DOWNLOAD_ERROR", details=str(e)))
+        db.session.commit()
+        flash(f"Erreur technique : {str(e)}", "danger")
+        return redirect(url_for('index'))
 
 # --- AUTHENTIFICATION ---
 
@@ -220,7 +269,6 @@ def register():
         except Exception as e:
             db.session.rollback()
             return f"Erreur d'écriture : {str(e)}"
-            
     return redirect(url_for('index'))
 
 @app.route('/logout')
@@ -229,11 +277,11 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
-# --- LANCEMENT ET INITIALISATION ---
+# --- LANCEMENT ---
 with app.app_context():
     try:
         db.create_all()
-        print("✅ Base de données DorkNet_CryptoVault prête.")
+        print("✅ DorkNet CryptoVault prêt et sécurisé.")
     except Exception as e:
         print(f"❌ Erreur DB : {e}")
 
