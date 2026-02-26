@@ -18,7 +18,7 @@
         
         input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid var(--border); background: #0d1117; color: white; box-sizing: border-box; }
         button { background: var(--primary); color: black; font-weight: bold; cursor: pointer; border: none; transition: 0.3s; text-transform: uppercase; }
-        button:hover { background: #00cc33; box-shadow: 0 0 15px rgba(0, 255, 65, 0.4); }
+        button:hover { background: #00cc33; filter: brightness(1.2); box-shadow: 0 0 15px rgba(0, 255, 65, 0.4); }
         
         .btn-sm-action { text-decoration: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; display: inline-block; }
         .btn-sm-action:hover { background: var(--primary); color: black; }
@@ -29,12 +29,15 @@
         
         .logout-link { color: var(--danger); text-decoration: none; font-size: 0.9rem; float: right; }
         .log-container { background-color: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 15px; max-height: 200px; overflow-y: auto; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px;}
         th { text-align: left; border-bottom: 1px solid #333; padding: 10px; color: var(--primary); }
-        td { padding: 10px; border-bottom: 1px solid #1a1a1a; }
+        td { padding: 10px; border-bottom: 1px solid #1a1a1a; vertical-align: middle; }
         .badge { background: #003311; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--primary); font-size: 0.75rem; }
         
         #encryption-status { font-size: 0.8rem; color: #e1b12c; display: none; margin-top: 5px; }
+        
+        /* Style spécifique pour l'effet néon demandé */
+        .neon-text { text-align: center; margin: 30px 0; color: #F5F5F5; font-weight: bold; text-shadow: 0 0 10px #00d4ff; letter-spacing: 2px; }
     </style>
 </head>
 <body>
@@ -42,7 +45,7 @@
         
         <div class="banner">
             <h1><i class="fas fa-network-wired"></i> DORKNET <span style="font-weight: 300;">CRYPTOVAULT</span></h1>
-            <small style="color: var(--primary); letter-spacing: 5px;">SOUVERAINETÉ NUMÉRIQUE PAR DR ENOCH NUMBI</small>
+            <small style="color: var(--primary); letter-spacing: 5px; display: block; margin-top: 10px;">CRYPTOGRAPHIC VAULT v2.0</small>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -55,29 +58,29 @@
 
         {% if current_user.is_authenticated %}
             <div class="user-panel">
-                <a href="/logout" class="logout-link"><i class="fas fa-sign-out-alt"></i> Quitter le Terminal</a>
+                <a href="/logout" class="logout-link"><i class="fas fa-sign-out-alt"></i> Déconnexion</a>
                 <p>Opérateur: <span style="color:var(--primary); font-weight: bold;">{{ current_user.username }}</span></p>
                 
                 <section style="margin-top: 30px;">
-                    <h3><i class="fas fa-lock"></i> Chiffrement Client-Side AES-GCM</h3>
+                    <h3><i class="fas fa-lock"></i> Sécuriser un fichier</h3>
                     <form id="secure-upload-form">
                         <input type="file" id="file-input" required>
-                        <input type="password" id="client-pass" placeholder="Clé de chiffrement locale (Non envoyée au serveur)" required>
-                        <button type="submit" id="btn-upload">Lancer le Chiffrement & Upload</button>
+                        <input type="password" id="client-pass" placeholder="Clé de chiffrement locale (Zero-Knowledge)" required>
+                        <button type="submit">Lancer le chiffrement AES-256 & Cloud</button>
                         <div id="encryption-status"><i class="fas fa-spinner fa-spin"></i> Chiffrement local en cours...</div>
                     </form>
                 </section>
 
                 <section style="margin-top: 40px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
-                        <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud</h3>
-                        <a href="/admin/logs" class="btn-sm-action">Panel Admin</a>
+                        <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud DorkNet</h3>
+                        <a href="/" class="btn-sm-action"><i class="fas fa-sync"></i> Actualiser</a>
                     </div>
                     
                     <table>
                         <thead>
                             <tr>
-                                <th>Archive (.enc)</th>
+                                <th>Nom (.enc)</th>
                                 <th>Taille</th>
                                 <th style="text-align: right;">Actions</th>
                             </tr>
@@ -85,14 +88,16 @@
                         <tbody>
                             {% for file in files %}
                             <tr>
-                                <td style="color: #aaa; font-size: 0.75rem;">{{ file.public_id }}</td>
+                                <td style="color: #aaa; font-size: 0.75rem; font-family: monospace;">{{ file.public_id }}</td>
                                 <td>{{ file.size }}</td>
                                 <td style="text-align: right;">
-                                    <a href="{{ url_for('download_cloud', public_id=file.public_id) }}" class="btn-sm-action">
+                                    <a href="{{ url_for('download_cloud', public_id=file.public_id) }}" class="btn-sm-action" title="Déchiffrer et Télécharger">
                                         <i class="fas fa-file-download"></i>
                                     </a>
                                 </td>
                             </tr>
+                            {% else %}
+                            <tr><td colspan="3" style="text-align: center; font-style: italic; color: #555;">Aucune archive détectée.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -104,21 +109,33 @@
                     <h3>Identification</h3>
                     <input type="text" name="username" placeholder="Pseudo Opérateur" required>
                     <input type="password" name="password" placeholder="Mot de passe" required>
-                    <button type="submit">Ouvrir le Bastion</button>
+                    <button type="submit">Accéder au Terminal</button>
                 </form>
                 
-                <div style="text-align: center; margin: 20px 0; color: #555;">[ INITIALISATION COMPTE ]</div>
+                <div class="neon-text">
+                    [ INITIALISATION NOUVEAU COMPTE ]
+                </div>
                 
                 <form action="/register" method="post">
-                    <input type="text" name="username" placeholder="Pseudo" required>
-                    <input type="password" name="password" placeholder="Mot de passe" required>
-                    <input type="password" name="pin" placeholder="PIN 2FA" maxlength="6" required>
-                    <button type="submit" style="background:#21262d; color:var(--primary); border: 1px solid var(--primary);">Générer Accès</button>
+                    <input type="text" name="username" placeholder="Nouveau pseudo" required>
+                    <input type="password" name="password" placeholder="Définir un mot de passe" required>
+                    <input type="password" name="pin" placeholder="Définir PIN Secret (2FA)" maxlength="6" required>
+                    <button type="submit" style="background:#21262d; color:var(--primary); border: 1px solid var(--primary);">Générer Accès Sécurisé</button>
                 </form>
             </div>
         {% endif %}
 
-        <footer style="margin-top: 50px; padding-top: 20px; border-top: 1px dashed var(--border); color: #8b949e; font-size: 0.8rem;">
+        <section style="margin-top: 50px; padding-top: 20px; border-top: 1px dashed var(--border); color: #8b949e; font-size: 0.85rem;">
+            <h3 style="font-size: 0.9rem; border:none;"><i class="fas fa-info-circle"></i> À PROPOS DE DORKNET CRYPTOVAULT</h3>
+            <p>
+                Dirigé par le <strong>Dr Enoch Numbi</strong>, ce système déploie une architecture 
+                <em>Zero-Knowledge</em> utilisant le chiffrement <strong>AES-256-EAX</strong>. 
+                Chaque transfert est audité et sécurisé par une double barrière d'authentification 
+                pour garantir une souveraineté numérique totale.
+            </p>
+        </section>
+
+        <footer style="margin-top: 20px; color: #8b949e; font-size: 0.8rem; text-align: center;">
             <p><strong>DorkNet Xchange</strong> : Système à connaissance nulle. Aucune donnée n'est accessible sans l'accord de l'opérateur principal.</p>
         </footer>
     </div>
