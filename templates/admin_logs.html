@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DorkNet CryptoVault - Administration des Logs</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #0b0e11; color: #e9ecef; font-family: 'Segoe UI', Roboto, sans-serif; }
+        .navbar { background-color: #161b22; border-bottom: 1px solid #30363d; }
+        .admin-container { margin-top: 50px; padding: 20px; }
+        .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; }
+        .table { color: #c9d1d9; border-color: #30363d; }
+        .table thead { background-color: #21262d; }
+        .status-breach { color: #f85149; font-weight: bold; background: rgba(248, 81, 73, 0.1); padding: 2px 8px; border-radius: 4px; }
+        .status-success { color: #3fb950; }
+        .status-upload { color: #58a6ff; }
+        .btn-purge { background-color: transparent; border: 1px solid #f85149; color: #f85149; transition: 0.3s; }
+        .btn-purge:hover { background-color: #f85149; color: white; }
+        .btn-kill { background-color: #f85149; color: white; font-weight: bold; border: none; transition: 0.3s; }
+        .btn-kill:hover { background-color: #b93a34; box-shadow: 0 0 15px rgba(248, 81, 73, 0.4); }
+        .log-timestamp { font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; color: #8b949e; }
+        .badge-admin { background-color: #d29922; color: #000; font-size: 0.7rem; vertical-align: middle; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4">
+    <a class="navbar-brand font-monospace" href="{{ url_for('index') }}">
+        <i class="fas fa-shield-halved me-2"></i>DORKNET CRYPTOVAULT <span class="badge badge-admin">ADMIN</span>
+    </a>
+    <div class="d-flex align-items-center">
+        <span class="me-3 text-secondary small">Dr Enoch Numbi</span>
+        <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline-secondary">Retour au Bastion</a>
+    </div>
+</nav>
+
+<div class="container admin-container">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <h2><i class="fas fa-terminal me-2 text-warning"></i>Journal d'Audit Intégral</h2>
+        
+        <div class="d-flex gap-2 align-items-center">
+            <form action="{{ url_for('trigger_kill_switch') }}" method="POST" onsubmit="return confirm('❗ ATTENTION : Vous allez verrouiller l\'intégralité du bastion. Confirmer le protocole SILENCE RADIO ?');">
+                <button type="submit" class="btn btn-sm btn-kill">
+                    <i class="fas fa-skull-crossbones me-1"></i> ACTIVER KILL SWITCH
+                </button>
+            </form>
+
+            <a href="{{ url_for('test_mail') }}" class="btn btn-sm btn-outline-info">
+                <i class="fas fa-envelope me-1"></i> Rapport Test
+            </a>
+
+            <form action="{{ url_for('clear_logs') }}" method="POST" onsubmit="return confirm('⚠️ Êtes-vous sûr de vouloir PURGER tous les logs ? Cette action est irréversible.');">
+                <button type="submit" class="btn btn-sm btn-purge">
+                    <i class="fas fa-trash-alt me-1"></i> Purger
+                </button>
+            </form>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} bg-dark border-{{ category }} text-white alert-dismissible fade show shadow-sm" role="alert">
+            <i class="fas {% if category == 'danger' %}fa-radiation{% else %}fa-info-circle{% endif %} me-2"></i>
+            {{ message }}
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="card shadow">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Horodatage</th>
+                        <th>Opérateur</th>
+                        <th>Action</th>
+                        <th>Détails de l'événement</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td class="log-timestamp">{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td><span class="text-info">@{{ log.username }}</span></td>
+                        <td>
+                            {% if log.action == 'SECURITY_BREACH' or log.action == 'SYS_LOCKDOWN' %}
+                                <span class="status-breach"><i class="fas fa-exclamation-triangle me-1"></i>{{ log.action }}</span>
+                            {% elif log.action == 'UPLOAD' %}
+                                <span class="status-upload"><i class="fas fa-cloud-upload-alt me-1"></i>UPLOAD</span>
+                            {% elif log.action == 'DOWNLOAD_SUCCESS' or log.action == '2FA_SUCCESS' %}
+                                <span class="status-success"><i class="fas fa-check-circle me-1"></i>{{ log.action }}</span>
+                            {% else %}
+                                <span class="text-secondary">{{ log.action }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="small text-wrap">{{ log.details }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not logs %}
+                    <tr>
+                        <td colspan="4" class="text-center py-5 text-secondary italic">Aucune entrée d'audit détectée.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<footer class="mt-5 mb-3 text-center text-secondary small">
+    <p>&copy; 2026 DorkNet CryptoVault - Administration de Sécurité de Haut Niveau</p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
