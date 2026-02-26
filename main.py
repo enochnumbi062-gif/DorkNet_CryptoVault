@@ -61,15 +61,30 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- ROUTES DE NAVIGATION & LOGS ---
+# --- ROUTES PRINCIPALES (DASHBOARD) ---
 
 @app.route('/')
 def index():
-    db.create_all() 
+    db.create_all()
     logs = []
+    cloud_files = []
     if current_user.is_authenticated:
+        # 1. Récupérer les 10 derniers logs d'audit
         logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all()
-    return render_template('index.html', logs=logs)
+        # 2. Récupérer les fichiers Cloudinary pour l'affichage immédiat
+        try:
+            resources = cloudinary.api.resources(resource_type="raw", type="upload", max_results=15)
+            for res in resources.get('resources', []):
+                cloud_files.append({
+                    'public_id': res['public_id'],
+                    'url': res['secure_url'],
+                    'size': f"{res['bytes'] / 1024:.1f} KB",
+                    'created_at': res['created_at']
+                })
+        except Exception as e:
+            print(f"Erreur Cloudinary : {e}")
+            
+    return render_template('index.html', logs=logs, files=cloud_files)
 
 @app.route('/export_logs')
 @login_required
@@ -86,7 +101,7 @@ def export_logs():
     proxy.close()
     return send_file(mem, as_attachment=True, download_name=f"Audit_DorkNet_{current_user.username}.csv", mimetype='text/csv')
 
-# --- ROUTES CLOUD (UPLOAD, LISTE, SUPPRESSION) ---
+# --- GESTION DES FICHIERS CLOUD ---
 
 @app.route('/upload', methods=['POST'])
 @login_required
@@ -94,6 +109,7 @@ def upload():
     file = request.files.get('file')
     if file and file.filename != '':
         try:
+            # Chiffrement AES
             cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX)
             nonce = cipher.nonce
             ciphertext, tag = cipher.encrypt_and_digest(file.read())
@@ -102,48 +118,31 @@ def upload():
             with open(enc_filename, 'wb') as f:
                 [f.write(x) for x in (nonce, tag, ciphertext)]
             
+            # Upload vers Cloudinary
             upload_result = cloudinary.uploader.upload(enc_filename, resource_type="raw")
             
+            # Nettoyage
             if os.path.exists(enc_filename):
                 os.remove(enc_filename)
             
-            log = AuditLog(username=current_user.username, action="CLOUD_UPLOAD", details=f"Fichier chiffré stocké : {file.filename}")
+            log = AuditLog(username=current_user.username, action="CLOUD_UPLOAD", details=f"Fichier chiffré : {file.filename}")
             db.session.add(log); db.session.commit()
             flash(f'Succès : {file.filename} est sécurisé dans le Cloud !')
         except Exception as e:
             flash(f'Erreur : {str(e)}')
     return redirect(url_for('index'))
 
-@app.route('/archives')
-@login_required
-def archives():
-    try:
-        # Récupération de la liste des fichiers sur Cloudinary
-        resources = cloudinary.api.resources(resource_type="raw", type="upload", max_results=50)
-        cloud_files = []
-        for res in resources.get('resources', []):
-            cloud_files.append({
-                'public_id': res['public_id'],
-                'url': res['secure_url'],
-                'created_at': res['created_at'],
-                'size': f"{res['bytes'] / 1024:.2f} KB"
-            })
-        return render_template('archives.html', files=cloud_files)
-    except Exception as e:
-        flash(f"Erreur Cloud : {str(e)}")
-        return redirect(url_for('index'))
-
 @app.route('/delete_cloud/<path:public_id>')
 @login_required
 def delete_cloud(public_id):
     try:
         cloudinary.uploader.destroy(public_id, resource_type="raw")
-        log = AuditLog(username=current_user.username, action="CLOUD_DELETE", details=f"Fichier supprimé : {public_id}")
+        log = AuditLog(username=current_user.username, action="CLOUD_DELETE", details=f"Suppression : {public_id}")
         db.session.add(log); db.session.commit()
-        flash(f"Fichier supprimé définitivement.")
+        flash(f"Fichier supprimé définitivement du Cloud.")
     except Exception as e:
         flash(f"Erreur suppression : {str(e)}")
-    return redirect(url_for('archives'))
+    return redirect(url_for('index'))
 
 # --- AUTHENTIFICATION ---
 
