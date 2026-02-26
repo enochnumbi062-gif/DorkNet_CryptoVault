@@ -13,15 +13,16 @@
         .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; }
         .table { color: #c9d1d9; border-color: #30363d; }
         .table thead { background-color: #21262d; }
-        .status-breach { color: #f85149; font-weight: bold; background: rgba(248, 81, 73, 0.1); padding: 2px 8px; border-radius: 4px; }
-        .status-success { color: #3fb950; }
-        .status-upload { color: #58a6ff; }
+        /* Style Néon spécifique à DorkNet */
+        .status-breach { color: #f85149; font-weight: bold; background: rgba(248, 81, 73, 0.1); padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(248, 81, 73, 0.3); }
+        .status-success { color: #3fb950; font-weight: bold; }
+        .status-upload { color: #58a6ff; font-weight: bold; }
         .btn-purge { background-color: transparent; border: 1px solid #f85149; color: #f85149; transition: 0.3s; }
         .btn-purge:hover { background-color: #f85149; color: white; }
         .btn-kill { background-color: #f85149; color: white; font-weight: bold; border: none; transition: 0.3s; }
         .btn-kill:hover { background-color: #b93a34; box-shadow: 0 0 15px rgba(248, 81, 73, 0.4); }
         .log-timestamp { font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; color: #8b949e; }
-        .badge-admin { background-color: #d29922; color: #000; font-size: 0.7rem; vertical-align: middle; }
+        .badge-admin { background-color: #00ff41; color: #000; font-size: 0.7rem; vertical-align: middle; }
     </style>
 </head>
 <body>
@@ -47,11 +48,11 @@
                 </button>
             </form>
 
-            <a href="{{ url_for('test_mail') }}" class="btn btn-sm btn-outline-info">
-                <i class="fas fa-envelope me-1"></i> Rapport Test
+            <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline-info">
+                <i class="fas fa-envelope me-1"></i> Dashboard
             </a>
 
-            <form action="{{ url_for('clear_logs') }}" method="POST" onsubmit="return confirm('⚠️ Êtes-vous sûr de vouloir PURGER tous les logs ? Cette action est irréversible.');">
+            <form action="{{ url_for('index') }}" method="POST" onsubmit="return confirm('⚠️ Purger les logs ? (Action irréversible)');">
                 <button type="submit" class="btn btn-sm btn-purge">
                     <i class="fas fa-trash-alt me-1"></i> Purger
                 </button>
@@ -85,14 +86,20 @@
                 <tbody>
                     {% for log in logs %}
                     <tr>
-                        <td class="log-timestamp">{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td class="log-timestamp">
+                            {% if log.timestamp.strftime %}
+                                {{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}
+                            {% else %}
+                                {{ log.timestamp }}
+                            {% endif %}
+                        </td>
                         <td><span class="text-info">@{{ log.username }}</span></td>
                         <td>
-                            {% if log.action == 'SECURITY_BREACH' or log.action == 'SYS_LOCKDOWN' %}
+                            {% if 'BREACH' in log.action or 'LOCKDOWN' in log.action or 'HONEYTOKEN' in log.action %}
                                 <span class="status-breach"><i class="fas fa-exclamation-triangle me-1"></i>{{ log.action }}</span>
                             {% elif log.action == 'UPLOAD' %}
                                 <span class="status-upload"><i class="fas fa-cloud-upload-alt me-1"></i>UPLOAD</span>
-                            {% elif log.action == 'DOWNLOAD_SUCCESS' or log.action == '2FA_SUCCESS' %}
+                            {% elif 'SUCCESS' in log.action %}
                                 <span class="status-success"><i class="fas fa-check-circle me-1"></i>{{ log.action }}</span>
                             {% else %}
                                 <span class="text-secondary">{{ log.action }}</span>
@@ -101,9 +108,10 @@
                         <td class="small text-wrap">{{ log.details }}</td>
                     </tr>
                     {% endfor %}
+                    
                     {% if not logs %}
                     <tr>
-                        <td colspan="4" class="text-center py-5 text-secondary italic">Aucune entrée d'audit détectée.</td>
+                        <td colspan="4" class="text-center py-5 text-secondary italic">Aucune entrée d'audit détectée dans la base de données.</td>
                     </tr>
                     {% endif %}
                 </tbody>
@@ -113,7 +121,7 @@
 </div>
 
 <footer class="mt-5 mb-3 text-center text-secondary small">
-    <p>&copy; 2026 DorkNet CryptoVault - Administration de Sécurité de Haut Niveau</p>
+    <p>&copy; 2026 DorkNet CryptoVault - Administration de Sécurité - Dr Enoch Numbi</p>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
