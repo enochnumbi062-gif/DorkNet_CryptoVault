@@ -60,12 +60,12 @@ if not aes_key_hex:
     aes_key_hex = get_random_bytes(32).hex()
 ENCRYPTION_KEY = bytes.fromhex(aes_key_hex)
 
-# --- MODÈLES DE DONNÉES ---
+# --- MODÈLES DE DONNÉES (OPTIMISÉS TEXT) ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
-    pin_code = db.Column(db.String(200), nullable=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.Text, nullable=False) # Format illimité pour compatibilité hachage
+    pin_code = db.Column(db.Text, nullable=True)  # Format illimité pour compatibilité hachage
 
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -121,11 +121,13 @@ def index():
 
 @app.route('/setup_db')
 def setup_db():
+    """Réinitialisation totale pour appliquer les nouveaux formats Text"""
     try:
+        db.drop_all() 
         db.create_all()
-        return "✅ Base de données DorkNet_CryptoVault configurée avec succès !"
+        return "✅ Base de données réinitialisée avec les nouveaux formats (Text) !"
     except Exception as e:
-        return f"❌ Erreur configuration : {str(e)}"
+        return f"❌ Erreur : {str(e)}"
 
 @app.route('/verify_2fa', methods=['GET', 'POST'])
 def verify_2fa():
@@ -199,7 +201,6 @@ def register():
     if User.query.filter_by(username=username).first():
         flash('Pseudo utilisé.', "danger")
     else:
-        # Hachage automatique compatible avec les versions récentes de Werkzeug
         new_user = User(
             username=username, 
             password=generate_password_hash(password),
@@ -222,7 +223,6 @@ def logout():
     return redirect(url_for('index'))
 
 # --- LANCEMENT ET INITIALISATION ---
-
 with app.app_context():
     try:
         db.create_all()
