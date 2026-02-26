@@ -181,7 +181,7 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
-# --- GESTION FICHIERS & HONEYTOKEN ---
+# --- GESTION FICHIERS & CLOUDINARY ---
 
 @app.route('/upload', methods=['POST'])
 @login_required
@@ -189,28 +189,29 @@ def upload():
     file = request.files.get('file')
     if file:
         try:
-            # On lit le contenu du fichier (déjà chiffré par le navigateur via AES-GCM)
+            # Lecture du fichier (chiffré côté client par AES-GCM)
             file_content = file.read()
             
-            # Envoi vers Cloudinary en mode 'raw' pour accepter les extensions .enc
-            cloudinary.uploader.upload(
-                file_content, 
-                resource_type="raw", 
+            # Correction cruciale : force le format 'raw' pour les fichiers .enc
+            upload_result = cloudinary.uploader.upload(
+                file_content,
+                resource_type="raw",
                 public_id=file.filename,
-                folder="DorkNet_Vault"
+                folder="DorkNet_Vault",
+                invalidate=True
             )
             
             db.session.add(AuditLog(
                 username=current_user.username, 
                 action="UPLOAD_SUCCESS", 
-                details=f"Fichier {file.filename} stocké sur Cloudinary"
+                details=f"Fichier {file.filename} envoyé avec succès sur Cloudinary."
             ))
             db.session.commit()
+            flash('Succès ! Le fichier est désormais dans le Cloud.', "success")
             
-            flash('Fichier sécurisé et envoyé sur Cloudinary !', "success")
         except Exception as e:
-            print(f"Erreur Cloudinary : {str(e)}")
-            flash(f"Erreur technique : {str(e)}", "danger")
+            print(f"ERREUR CLOUDINARY : {str(e)}")
+            flash(f"Échec de l'envoi : {str(e)}", "danger")
     return redirect(url_for('index'))
 
 @app.route('/download_cloud/<path:public_id>')
@@ -224,13 +225,12 @@ def download_cloud(public_id):
         flash("🚫 Erreur critique de sécurité.", "danger")
         return redirect(url_for('index'))
     try:
-        # Récupération de la ressource brute sur Cloudinary
+        # Récupération en mode 'raw'
         res = cloudinary.api.resource(public_id, resource_type="raw")
         response = requests.get(res['secure_url'])
-        # Le fichier téléchargé est renvoyé tel quel au client (car déjà chiffré en AES-GCM côté client)
         return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
     except Exception as e: 
-        flash("🚫 Échec de récupération du fichier.", "danger")
+        flash(f"🚫 Échec de récupération : {str(e)}", "danger")
         return redirect(url_for('index'))
 
 # --- ROUTES ADMIN ---
@@ -272,12 +272,14 @@ def trigger_kill_switch():
     flash("🚨 BASTION VERROUILLÉ.", "danger")
     return redirect(url_for('admin_logs'))
 
+# --- ROUTE PRINCIPALE ---
+
 @app.route('/')
 def index():
-    cloud_files, logs = [], []
+    cloud_files = []
     if current_user.is_authenticated:
         try:
-            # Force la recherche des fichiers de type 'raw' (vos fichiers .enc chiffrés)
+            # Force la recherche des fichiers de type 'raw' (vos .enc)
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
                 cloud_files = [
@@ -286,9 +288,10 @@ def index():
                         'size': f"{r['bytes']/1024:.1f} KB"
                     } for r in res['resources']
                 ]
-            logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all()
         except Exception as e:
-            print(f"Erreur de lecture Cloud : {e}")
+            print(f"Erreur d'affichage Cloud : {e}")
+            
+    logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
 
 if __name__ == '__main__':
