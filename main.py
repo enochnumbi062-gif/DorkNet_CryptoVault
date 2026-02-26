@@ -57,7 +57,6 @@ scheduler = APScheduler()
 # --- SÉCURITÉ : CLÉ AES-256 ---
 aes_key_hex = os.getenv('AES_KEY')
 if not aes_key_hex:
-    # Génération d'une clé temporaire si absente (Attention: non persistant)
     aes_key_hex = get_random_bytes(32).hex()
 ENCRYPTION_KEY = bytes.fromhex(aes_key_hex)
 
@@ -99,7 +98,6 @@ def send_audit_report():
         except Exception as e:
             print(f"Erreur Scheduler : {e}")
 
-# Planification : Toutes les 48 heures
 if not scheduler.running:
     scheduler.add_job(id='audit_report_job', func=send_audit_report, trigger='interval', hours=48)
     scheduler.start()
@@ -123,7 +121,6 @@ def index():
 
 @app.route('/setup_db')
 def setup_db():
-    """Route de secours pour forcer la création des tables sur Render"""
     try:
         db.create_all()
         return "✅ Base de données DorkNet_CryptoVault configurée avec succès !"
@@ -147,7 +144,7 @@ def verify_2fa():
             flash("Code PIN invalide.", "danger")
     return render_template('2fa.html')
 
-# --- GESTION DES FICHIERS & SÉCURITÉ ---
+# --- GESTION DES FICHIERS ---
 
 @app.route('/upload', methods=['POST'])
 @login_required
@@ -159,13 +156,10 @@ def upload():
             nonce = cipher.nonce
             ciphertext, tag = cipher.encrypt_and_digest(file.read())
             enc_filename = file.filename + '.enc'
-            
             with open(enc_filename, 'wb') as f:
                 [f.write(x) for x in (nonce, tag, ciphertext)]
-            
             cloudinary.uploader.upload(enc_filename, resource_type="raw")
             os.remove(enc_filename)
-            
             db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=f"Fichier : {file.filename}"))
             db.session.commit()
             flash(f'Succès : {file.filename} est sécurisé !', "success")
@@ -205,14 +199,20 @@ def register():
     if User.query.filter_by(username=username).first():
         flash('Pseudo utilisé.', "danger")
     else:
+        # Hachage automatique compatible avec les versions récentes de Werkzeug
         new_user = User(
             username=username, 
-            password=generate_password_hash(password, method='pbkdf2:sha256'),
-            pin_code=generate_password_hash(pin, method='pbkdf2:sha256')
+            password=generate_password_hash(password),
+            pin_code=generate_password_hash(pin)
         )
-        db.session.add(new_user)
-        db.session.commit()
-        flash('Compte créé ! Connectez-vous.', "success")
+        try:
+            db.session.add(new_user)
+            db.session.commit()
+            flash('Compte créé ! Connectez-vous.', "success")
+        except Exception as e:
+            db.session.rollback()
+            return f"Erreur d'écriture : {str(e)}"
+            
     return redirect(url_for('index'))
 
 @app.route('/logout')
@@ -223,7 +223,6 @@ def logout():
 
 # --- LANCEMENT ET INITIALISATION ---
 
-# Cette partie assure la création des tables au lancement sur Render
 with app.app_context():
     try:
         db.create_all()
@@ -232,6 +231,5 @@ with app.app_context():
         print(f"❌ Erreur lors de l'initialisation de la DB : {e}")
 
 if __name__ == '__main__':
-    # Configuration pour Render (port dynamique)
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
