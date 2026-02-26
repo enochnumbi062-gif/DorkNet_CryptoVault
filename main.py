@@ -25,7 +25,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 
-# Configuration Base de données (PostgreSQL pour Render ou SQLite local)
+# Configuration Base de données (PostgreSQL ou SQLite)
 db_url = os.getenv('DATABASE_URL', 'sqlite:///cryptovault.db')
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
@@ -60,12 +60,12 @@ if not aes_key_hex:
     aes_key_hex = get_random_bytes(32).hex()
 ENCRYPTION_KEY = bytes.fromhex(aes_key_hex)
 
-# --- MODÈLES DE DONNÉES (OPTIMISÉS TEXT) ---
+# --- MODÈLES DE DONNÉES (OPTIMISÉS) ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
-    password = db.Column(db.Text, nullable=False) # Format illimité pour compatibilité hachage
-    pin_code = db.Column(db.Text, nullable=True)  # Format illimité pour compatibilité hachage
+    password = db.Column(db.Text, nullable=False) 
+    pin_code = db.Column(db.Text, nullable=True)  
 
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -128,6 +128,13 @@ def setup_db():
         return "✅ Base de données réinitialisée avec les nouveaux formats (Text) !"
     except Exception as e:
         return f"❌ Erreur : {str(e)}"
+
+@app.route('/test_mail')
+@login_required
+def test_mail():
+    """Route de test pour valider l'envoi SMTP immédiatement"""
+    send_audit_report()
+    return "🚀 Tentative d'envoi du rapport d'audit lancée ! Vérifiez votre boîte mail."
 
 @app.route('/verify_2fa', methods=['GET', 'POST'])
 def verify_2fa():
@@ -226,9 +233,9 @@ def logout():
 with app.app_context():
     try:
         db.create_all()
-        print("✅ Base de données DorkNet_CryptoVault initialisée avec succès.")
+        print("✅ Base de données DorkNet_CryptoVault prête.")
     except Exception as e:
-        print(f"❌ Erreur lors de l'initialisation de la DB : {e}")
+        print(f"❌ Erreur DB : {e}")
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
