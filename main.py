@@ -31,10 +31,8 @@ login_manager = LoginManager(app)
 login_manager.login_view = 'index'
 
 # --- SÉCURITÉ : CLÉ AES ---
-# On récupère la clé 256-bit depuis les variables d'environnement
 aes_key_hex = os.getenv('AES_KEY')
 if not aes_key_hex:
-    # Génère une clé temporaire si aucune n'est configurée (Attention : non persistant)
     aes_key_hex = get_random_bytes(32).hex()
     print(f"⚠️ ATTENTION : AES_KEY générée par défaut. Notez-la : {aes_key_hex}")
 
@@ -54,6 +52,11 @@ def load_user(user_id):
 
 @app.route('/')
 def index():
+    # --- SOLUTION RENDER FREE ---
+    # Cette ligne crée les tables PostgreSQL automatiquement dès que vous visitez le site
+    # pour éviter l'erreur "relation user does not exist" sans avoir accès au Shell.
+    db.create_all() 
+    
     files = []
     if current_user.is_authenticated:
         if not os.path.exists(app.config['UPLOAD_FOLDER']):
@@ -94,12 +97,10 @@ def upload():
     file = request.files.get('file')
     if file and file.filename != '':
         try:
-            # Chiffrement AES-EAX (Authentifié)
             cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX)
             nonce = cipher.nonce
             ciphertext, tag = cipher.encrypt_and_digest(file.read())
             
-            # Sauvegarde du fichier chiffré (.enc)
             filename = file.filename + '.enc'
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             with open(path, 'wb') as f:
@@ -115,10 +116,8 @@ def download(filename):
     try:
         path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         with open(path, 'rb') as f:
-            # Lecture des métadonnées AES
             nonce, tag, ciphertext = [f.read(x) for x in (16, 16, -1)]
         
-        # Déchiffrement
         cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX, nonce=nonce)
         data = cipher.decrypt_and_verify(ciphertext, tag)
         
@@ -148,5 +147,5 @@ def logout():
 # --- LANCEMENT ---
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all()  # Crée la DB PostgreSQL ou SQLite au démarrage
+        db.create_all()
     app.run(debug=True)
