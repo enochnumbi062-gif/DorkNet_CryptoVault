@@ -1,8 +1,30 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>DorkNet CryptoVault</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root { --primary: #00ff41; --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --danger: #f85149; }
+        body { background-color: var(--bg); color: var(--text); font-family: 'Courier New', monospace; padding: 20px; }
+        .container { background: var(--card); padding: 2rem; border-radius: 12px; max-width: 800px; margin: auto; border: 1px solid var(--border); }
+        .banner { text-align: center; border: 2px solid var(--primary); padding: 15px; margin-bottom: 20px; }
+        h1 { color: var(--primary); text-transform: uppercase; margin: 0; }
+        input, button { width: 100%; padding: 10px; margin: 5px 0; border-radius: 4px; border: 1px solid var(--border); background: #0a0c10; color: white; }
+        button { background: var(--primary); color: black; font-weight: bold; cursor: pointer; border: none; }
+        .btn-admin { background: none; border: 1px solid var(--primary); color: var(--primary); padding: 5px 10px; text-decoration: none; font-size: 0.8rem; }
+        .logout-link { color: var(--danger); float: right; text-decoration: none; }
+        table { width: 100%; margin-top: 20px; border-collapse: collapse; }
+        th { color: var(--primary); text-align: left; border-bottom: 1px solid var(--border); }
+        .flash { padding: 10px; margin-bottom: 10px; border-radius: 4px; text-align: center; }
+        .flash-success { border: 1px solid var(--primary); color: var(--primary); }
+    </style>
+</head>
 <body>
     <div class="container">
         <div class="banner">
-            <h1><i class="fas fa-network-wired"></i> DORKNET <span style="font-weight: 300;">CRYPTOVAULT</span></h1>
-            <small style="color: var(--primary); letter-spacing: 5px; display: block; margin-top: 10px;">CRYPTOGRAPHIC VAULT v2.0</small>
+            <h1><i class="fas fa-network-wired"></i> DORKNET CRYPTOVAULT</h1>
+            <small>SOUVERAINETÉ NUMÉRIQUE PAR DR ENOCH NUMBI</small>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -12,65 +34,44 @@
         {% endwith %}
 
         {% if current_user.is_authenticated %}
-            <div class="user-panel">
-                <a href="{{ url_for('logout') }}" class="logout-link"><i class="fas fa-sign-out-alt"></i> Quitter le Terminal</a>
-                <p>Opérateur: <span style="color:var(--primary); font-weight: bold;">{{ current_user.username }}</span></p>
-                
-                <section style="margin-top: 30px;">
-                    <h3><i class="fas fa-lock"></i> Chiffrement Client-Side AES-GCM</h3>
-                    <form id="secure-upload-form">
-                        <input type="file" id="file-input" required>
-                        <input type="password" id="client-pass" placeholder="Clé de chiffrement locale (Non envoyée au serveur)" required>
-                        <button type="submit" id="btn-upload">Lancer le Chiffrement & Upload</button>
-                        <div id="encryption-status"><i class="fas fa-spinner fa-spin"></i> Chiffrement local en cours...</div>
-                    </form>
-                </section>
+            <a href="{{ url_for('logout') }}" class="logout-link">Quitter le Terminal</a>
+            <p>Opérateur: <span style="color:var(--primary)">{{ current_user.username }}</span></p>
+            
+            <h3><i class="fas fa-lock"></i> Chiffrement AES-GCM</h3>
+            <form action="/upload" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file" required>
+                <button type="submit">Lancer le Chiffrement & Upload</button>
+            </form>
 
-                <section style="margin-top: 40px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
-                        <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud</h3>
-                        <a href="{{ url_for('admin_logs') }}" class="btn-sm-action">Panel Admin</a>
-                    </div>
-                    <table>
-                        <thead><tr><th>Archive (.enc)</th><th>Taille</th><th style="text-align: right;">Actions</th></tr></thead>
-                        <tbody>
-                            {% for file in files %}
-                            <tr>
-                                <td style="color: #aaa; font-size: 0.75rem;">{{ file.public_id }}</td>
-                                <td>{{ file.size }}</td>
-                                <td style="text-align: right;">
-                                    <a href="{{ url_for('download_cloud', public_id=file.public_id) }}" class="btn-sm-action"><i class="fas fa-file-download"></i></a>
-                                    <a href="{{ url_for('delete_cloud', public_id=file.public_id) }}" class="btn-sm-action" style="border-color: var(--danger); color: var(--danger);" onclick="return confirm('Supprimer définitivement ?');"><i class="fas fa-trash"></i></a>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </section>
-
-                <section style="margin-top: 40px;">
-                    <h3><i class="fas fa-list-ul"></i> Journal d'Audit</h3>
-                    <div class="log-container">
-                        <table>
-                            <tbody>
-                                {% for log in logs %}
-                                <tr>
-                                    <td style="color: #666; width: 80px;">{{ log.timestamp.strftime('%H:%M:%S') }}</td>
-                                    <td><span class="badge">{{ log.action }}</span></td>
-                                    <td style="color: #aaa;">{{ log.details }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
+            <div style="display:flex; justify-content:space-between; margin-top:30px;">
+                <h3>Archives Cloud</h3>
+                <a href="{{ url_for('admin_logs') }}" class="btn-admin">Panel Admin</a>
             </div>
+            <table>
+                <tr><th>Archive</th><th>Taille</th><th>Actions</th></tr>
+                {% for file in files %}
+                <tr>
+                    <td>{{ file.public_id }}</td>
+                    <td>{{ file.size }}</td>
+                    <td><i class="fas fa-download"></i></td>
+                </tr>
+                {% endfor %}
+            </table>
         {% else %}
-            {% endif %}
-
-        <section style="margin-top: 50px; padding-top: 20px; border-top: 1px dashed var(--border); color: #8b949e; font-size: 0.85rem;">
-            <h3 style="font-size: 0.9rem; border:none;"><i class="fas fa-info-circle"></i> À PROPOS DE DORKNET CRYPTOVAULT</h3>
-            <p>Dirigé par le <strong>Dr Enoch Numbi</strong>, ce système déploie une architecture <em>Zero-Knowledge</em> utilisant le chiffrement <strong>AES-256-EAX</strong>.</p>
-        </section>
+            <form action="/login" method="POST">
+                <h3>Identification</h3>
+                <input type="text" name="username" placeholder="Pseudo" required>
+                <input type="password" name="password" placeholder="Mot de passe" required>
+                <button type="submit">OUVRIR LE BASTION</button>
+            </form>
+            <hr style="border: 0.5px solid var(--border); margin: 20px 0;">
+            <form action="/register" method="POST">
+                <input type="text" name="username" placeholder="Pseudo" required>
+                <input type="password" name="password" placeholder="Mot de passe" required>
+                <input type="text" name="pin" placeholder="PIN 2FA" required>
+                <button type="submit" style="background:none; color:var(--primary); border:1px solid var(--primary);">GÉNÉRER ACCÈS</button>
+            </form>
+        {% endif %}
     </div>
-    </body>
+</body>
+</html>
