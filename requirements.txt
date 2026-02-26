@@ -4,3 +4,4 @@ Flask-SQLAlchemy
 python-dotenv
 pycryptodome
 gunicorn
+psycopg2-binary
