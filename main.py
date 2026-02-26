@@ -1,6 +1,9 @@
 import os
 import io
 import csv
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
@@ -14,24 +17,28 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# --- CONFIGURATION ---
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-xchange-default-secret')
+# --- CONFIGURATION GÉNÉRALE ---
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-xchange-88')
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 
-# Configuration PostgreSQL avec correction pour Render
+# Configuration Base de données (PostgreSQL pour Render ou SQLite local)
 db_url = os.getenv('DATABASE_URL', 'sqlite:///cryptovault.db')
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
-
-# Initialisation
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'index'
 
-# --- SÉCURITÉ : CLÉ AES ---
+# --- CONFIGURATION CLOUDINARY ---
+cloudinary.config(
+  cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
+  api_key = os.getenv('CLOUDINARY_API_KEY'),
+  api_secret = os.getenv('CLOUDINARY_API_SECRET')
+)
+
+# --- SÉCURITÉ : CLÉ AES-256 ---
 aes_key_hex = os.getenv('AES_KEY')
 if not aes_key_hex:
     aes_key_hex = get_random_bytes(32).hex()
@@ -54,19 +61,91 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- ROUTES ---
+# --- ROUTES DE NAVIGATION & LOGS ---
 
 @app.route('/')
 def index():
     db.create_all() 
-    files = []
     logs = []
     if current_user.is_authenticated:
-        if not os.path.exists(app.config['UPLOAD_FOLDER']):
-            os.makedirs(app.config['UPLOAD_FOLDER'])
-        files = os.listdir(app.config['UPLOAD_FOLDER'])
         logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all()
-    return render_template('index.html', files=files, logs=logs)
+    return render_template('index.html', logs=logs)
+
+@app.route('/export_logs')
+@login_required
+def export_logs():
+    logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
+    proxy = io.StringIO()
+    writer = csv.writer(proxy)
+    writer.writerow(['Date', 'Utilisateur', 'Action', 'Details'])
+    for log in logs:
+        writer.writerow([log.timestamp, log.username, log.action, log.details])
+    mem = io.BytesIO()
+    mem.write(proxy.getvalue().encode('utf-8'))
+    mem.seek(0)
+    proxy.close()
+    return send_file(mem, as_attachment=True, download_name=f"Audit_DorkNet_{current_user.username}.csv", mimetype='text/csv')
+
+# --- ROUTES CLOUD (UPLOAD, LISTE, SUPPRESSION) ---
+
+@app.route('/upload', methods=['POST'])
+@login_required
+def upload():
+    file = request.files.get('file')
+    if file and file.filename != '':
+        try:
+            cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX)
+            nonce = cipher.nonce
+            ciphertext, tag = cipher.encrypt_and_digest(file.read())
+            
+            enc_filename = file.filename + '.enc'
+            with open(enc_filename, 'wb') as f:
+                [f.write(x) for x in (nonce, tag, ciphertext)]
+            
+            upload_result = cloudinary.uploader.upload(enc_filename, resource_type="raw")
+            
+            if os.path.exists(enc_filename):
+                os.remove(enc_filename)
+            
+            log = AuditLog(username=current_user.username, action="CLOUD_UPLOAD", details=f"Fichier chiffré stocké : {file.filename}")
+            db.session.add(log); db.session.commit()
+            flash(f'Succès : {file.filename} est sécurisé dans le Cloud !')
+        except Exception as e:
+            flash(f'Erreur : {str(e)}')
+    return redirect(url_for('index'))
+
+@app.route('/archives')
+@login_required
+def archives():
+    try:
+        # Récupération de la liste des fichiers sur Cloudinary
+        resources = cloudinary.api.resources(resource_type="raw", type="upload", max_results=50)
+        cloud_files = []
+        for res in resources.get('resources', []):
+            cloud_files.append({
+                'public_id': res['public_id'],
+                'url': res['secure_url'],
+                'created_at': res['created_at'],
+                'size': f"{res['bytes'] / 1024:.2f} KB"
+            })
+        return render_template('archives.html', files=cloud_files)
+    except Exception as e:
+        flash(f"Erreur Cloud : {str(e)}")
+        return redirect(url_for('index'))
+
+@app.route('/delete_cloud/<path:public_id>')
+@login_required
+def delete_cloud(public_id):
+    try:
+        cloudinary.uploader.destroy(public_id, resource_type="raw")
+        log = AuditLog(username=current_user.username, action="CLOUD_DELETE", details=f"Fichier supprimé : {public_id}")
+        db.session.add(log); db.session.commit()
+        flash(f"Fichier supprimé définitivement.")
+    except Exception as e:
+        flash(f"Erreur suppression : {str(e)}")
+    return redirect(url_for('archives'))
+
+# --- AUTHENTIFICATION ---
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -75,7 +154,7 @@ def login():
     user = User.query.filter_by(username=username).first()
     if user and check_password_hash(user.password, password):
         login_user(user)
-        log = AuditLog(username=username, action="CONNEXION", details="Accès réussi au coffre")
+        log = AuditLog(username=username, action="CONNEXION", details="Accès au système")
         db.session.add(log); db.session.commit()
     else:
         flash('Identifiants incorrects.')
@@ -91,61 +170,10 @@ def register():
         hashed_pw = generate_password_hash(password, method='pbkdf2:sha256')
         new_user = User(username=username, password=hashed_pw)
         db.session.add(new_user)
-        log = AuditLog(username=username, action="INSCRIPTION", details="Nouveau compte DorkNet créé")
+        log = AuditLog(username=username, action="INSCRIPTION", details="Nouveau compte créé")
         db.session.add(log); db.session.commit()
-        flash('Compte créé !')
+        flash('Compte créé ! Connectez-vous.')
     return redirect(url_for('index'))
-
-@app.route('/upload', methods=['POST'])
-@login_required
-def upload():
-    file = request.files.get('file')
-    if file and file.filename != '':
-        try:
-            cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX)
-            nonce = cipher.nonce
-            ciphertext, tag = cipher.encrypt_and_digest(file.read())
-            filename = file.filename + '.enc'
-            path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            with open(path, 'wb') as f:
-                [f.write(x) for x in (nonce, tag, ciphertext)]
-            log = AuditLog(username=current_user.username, action="CHIFFREMENT", details=f"Fichier sécurisé : {file.filename}")
-            db.session.add(log); db.session.commit()
-            flash(f'Fichier sécurisé.')
-        except Exception as e:
-            flash(f'Erreur : {str(e)}')
-    return redirect(url_for('index'))
-
-@app.route('/download/<filename>')
-@login_required
-def download(filename):
-    try:
-        path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        with open(path, 'rb') as f:
-            nonce, tag, ciphertext = [f.read(x) for x in (16, 16, -1)]
-        cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX, nonce=nonce)
-        data = cipher.decrypt_and_verify(ciphertext, tag)
-        log = AuditLog(username=current_user.username, action="DÉCHIFFREMENT", details=f"Accès au fichier : {filename}")
-        db.session.add(log); db.session.commit()
-        return send_file(io.BytesIO(data), as_attachment=True, download_name=filename.replace('.enc', ''))
-    except Exception:
-        flash('Échec du déchiffrement.')
-        return redirect(url_for('index'))
-
-@app.route('/export_logs')
-@login_required
-def export_logs():
-    logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
-    proxy = io.StringIO()
-    writer = csv.writer(proxy)
-    writer.writerow(['Date', 'Utilisateur', 'Action', 'Details'])
-    for log in logs:
-        writer.writerow([log.timestamp, log.username, log.action, log.details])
-    mem = io.BytesIO()
-    mem.write(proxy.getvalue().encode('utf-8'))
-    mem.seek(0)
-    proxy.close()
-    return send_file(mem, as_attachment=True, download_name=f"DorkNet_Audit_{current_user.username}.csv", mimetype='text/csv')
 
 @app.route('/logout')
 def logout():
