@@ -10,3 +10,5 @@ werkzeug
 gunicorn
 flask-mail
 flask-apscheduler
+Flask-Limiter
+
