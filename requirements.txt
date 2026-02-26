@@ -1,8 +1,10 @@
-Flask
-Flask-Login
-Flask-SQLAlchemy
-python-dotenv
-pycryptodome
-gunicorn
+flask
+flask-sqlalchemy
+flask-login
 psycopg2-binary
+python-dotenv
 cloudinary
+pycryptodome
+requests
+werkzeug
+gunicorn
