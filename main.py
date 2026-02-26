@@ -16,20 +16,21 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 
-# Chargement des variables d'environnement
+# --- CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ---
 load_dotenv()
 
 app = Flask(__name__)
 
 # --- CONFIGURATION GÉNÉRALE ---
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-xchange-88-secure-key')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 
-# Configuration Base de données (PostgreSQL ou SQLite)
+# Configuration Base de données (PostgreSQL pour Render ou SQLite local)
 db_url = os.getenv('DATABASE_URL', 'sqlite:///cryptovault.db')
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
@@ -56,6 +57,7 @@ scheduler = APScheduler()
 # --- SÉCURITÉ : CLÉ AES-256 ---
 aes_key_hex = os.getenv('AES_KEY')
 if not aes_key_hex:
+    # Génération d'une clé temporaire si absente (Attention: non persistant)
     aes_key_hex = get_random_bytes(32).hex()
 ENCRYPTION_KEY = bytes.fromhex(aes_key_hex)
 
@@ -78,32 +80,34 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 # --- FONCTIONS AUTOMATIQUES (RAPPORTS) ---
-
 def send_audit_report():
     with app.app_context():
-        logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
-        proxy = io.StringIO()
-        writer = csv.writer(proxy)
-        writer.writerow(['Date', 'Utilisateur', 'Action', 'Details'])
-        for log in logs:
-            writer.writerow([log.timestamp, log.username, log.action, log.details])
-        
-        msg = Message(f"Rapport d'Audit DorkNet Xchange - {datetime.now().strftime('%d/%m/%Y')}",
-                      recipients=[os.getenv('MAIL_USER')])
-        msg.body = "Veuillez trouver ci-joint le rapport d'audit complet des dernières 48 heures de DorkNet Xchange."
-        msg.attach(f"Audit_DorkNet_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv", proxy.getvalue())
-        mail.send(msg)
-        print("Rapport d'audit périodique envoyé.")
+        try:
+            logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
+            proxy = io.StringIO()
+            writer = csv.writer(proxy)
+            writer.writerow(['Date', 'Utilisateur', 'Action', 'Details'])
+            for log in logs:
+                writer.writerow([log.timestamp, log.username, log.action, log.details])
+            
+            msg = Message(f"Rapport d'Audit DorkNet_CryptoVault - {datetime.now().strftime('%d/%m/%Y')}",
+                          recipients=[os.getenv('MAIL_USER')])
+            msg.body = "Veuillez trouver ci-joint le rapport d'audit complet de DorkNet_CryptoVault."
+            msg.attach(f"Audit_DorkNet_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv", proxy.getvalue())
+            mail.send(msg)
+            print("Rapport d'audit périodique envoyé.")
+        except Exception as e:
+            print(f"Erreur Scheduler : {e}")
 
 # Planification : Toutes les 48 heures
-scheduler.add_job(id='audit_report_job', func=send_audit_report, trigger='interval', hours=48)
-scheduler.start()
+if not scheduler.running:
+    scheduler.add_job(id='audit_report_job', func=send_audit_report, trigger='interval', hours=48)
+    scheduler.start()
 
 # --- ROUTES DE NAVIGATION ---
 
 @app.route('/')
 def index():
-    db.create_all()
     logs, cloud_files = [], []
     if current_user.is_authenticated:
         logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all()
@@ -112,12 +116,19 @@ def index():
             for res in resources.get('resources', []):
                 cloud_files.append({
                     'public_id': res['public_id'],
-                    'url': res['secure_url'],
-                    'size': f"{res['bytes'] / 1024:.1f} KB",
-                    'created_at': res['created_at']
+                    'size': f"{res['bytes'] / 1024:.1f} KB"
                 })
         except: pass
     return render_template('index.html', logs=logs, files=cloud_files)
+
+@app.route('/setup_db')
+def setup_db():
+    """Route de secours pour forcer la création des tables sur Render"""
+    try:
+        db.create_all()
+        return "✅ Base de données DorkNet_CryptoVault configurée avec succès !"
+    except Exception as e:
+        return f"❌ Erreur configuration : {str(e)}"
 
 @app.route('/verify_2fa', methods=['GET', 'POST'])
 def verify_2fa():
@@ -129,35 +140,14 @@ def verify_2fa():
         if user and check_password_hash(user.pin_code, pin):
             login_user(user)
             session.pop('pending_user_id')
-            log = AuditLog(username=user.username, action="2FA_SUCCESS", details="Connexion sécurisée validée")
-            db.session.add(log); db.session.commit()
+            db.session.add(AuditLog(username=user.username, action="2FA_SUCCESS", details="Connexion validée"))
+            db.session.commit()
             return redirect(url_for('index'))
         else:
             flash("Code PIN invalide.", "danger")
     return render_template('2fa.html')
 
-@app.route('/test_key')
-@login_required
-def test_key():
-    try:
-        cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX)
-        ciphertext, tag = cipher.encrypt_and_digest(b"test")
-        cipher_dec = AES.new(ENCRYPTION_KEY, AES.MODE_EAX, nonce=cipher.nonce)
-        if cipher_dec.decrypt_and_verify(ciphertext, tag) == b"test":
-            flash("✅ Clé AES-256 opérationnelle.", "success")
-        else: flash("⚠️ Erreur d'intégrité.", "danger")
-    except Exception as e: flash(f"❌ Échec : {str(e)}", "danger")
-    return redirect(url_for('index'))
-
-@app.route('/test_mail')
-@login_required
-def test_mail():
-    try:
-        send_audit_report()
-        return f"✅ Rapport envoyé à {os.getenv('MAIL_USER')}"
-    except Exception as e: return f"❌ Erreur SMTP : {str(e)}"
-
-# --- GESTION DES FICHIERS ---
+# --- GESTION DES FICHIERS & SÉCURITÉ ---
 
 @app.route('/upload', methods=['POST'])
 @login_required
@@ -169,13 +159,16 @@ def upload():
             nonce = cipher.nonce
             ciphertext, tag = cipher.encrypt_and_digest(file.read())
             enc_filename = file.filename + '.enc'
+            
             with open(enc_filename, 'wb') as f:
                 [f.write(x) for x in (nonce, tag, ciphertext)]
+            
             cloudinary.uploader.upload(enc_filename, resource_type="raw")
             os.remove(enc_filename)
-            log = AuditLog(username=current_user.username, action="UPLOAD", details=f"Fichier : {file.filename}")
-            db.session.add(log); db.session.commit()
-            flash(f'Succès : {file.filename} est chiffré dans le Cloud !', "success")
+            
+            db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=f"Fichier : {file.filename}"))
+            db.session.commit()
+            flash(f'Succès : {file.filename} est sécurisé !', "success")
         except Exception as e: flash(f'Erreur : {str(e)}', "danger")
     return redirect(url_for('index'))
 
@@ -192,17 +185,6 @@ def download_cloud(public_id):
         return send_file(io.BytesIO(decrypted_data), as_attachment=True, download_name=public_id.replace('.enc', ''))
     except Exception as e: flash(f"Erreur : {str(e)}", "danger"); return redirect(url_for('index'))
 
-@app.route('/delete_cloud/<path:public_id>')
-@login_required
-def delete_cloud(public_id):
-    try:
-        cloudinary.uploader.destroy(public_id, resource_type="raw")
-        db.session.add(AuditLog(username=current_user.username, action="DELETE", details=public_id))
-        db.session.commit()
-        flash("Supprimé du Cloud.", "success")
-    except Exception as e: flash(str(e), "danger")
-    return redirect(url_for('index'))
-
 # --- AUTHENTIFICATION ---
 
 @app.route('/login', methods=['POST'])
@@ -216,34 +198,40 @@ def login():
 
 @app.route('/register', methods=['POST'])
 def register():
-    username, password, pin = request.form.get('username'), request.form.get('password'), request.form.get('pin')
-    if User.query.filter_by(username=username).first(): flash('Pseudo utilisé.', "danger")
+    username = request.form.get('username')
+    password = request.form.get('password')
+    pin = request.form.get('pin')
+    
+    if User.query.filter_by(username=username).first():
+        flash('Pseudo utilisé.', "danger")
     else:
-        new_user = User(username=username, 
-                        password=generate_password_hash(password, method='pbkdf2:sha256'),
-                        pin_code=generate_password_hash(pin, method='pbkdf2:sha256'))
-        db.session.add(new_user); db.session.commit()
+        new_user = User(
+            username=username, 
+            password=generate_password_hash(password, method='pbkdf2:sha256'),
+            pin_code=generate_password_hash(pin, method='pbkdf2:sha256')
+        )
+        db.session.add(new_user)
+        db.session.commit()
         flash('Compte créé ! Connectez-vous.', "success")
     return redirect(url_for('index'))
 
 @app.route('/logout')
 def logout():
-    logout_user(); session.clear()
+    logout_user()
+    session.clear()
     return redirect(url_for('index'))
 
-@app.route('/export_logs')
-@login_required
-def export_logs():
-    logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
-    proxy = io.StringIO()
-    writer = csv.writer(proxy)
-    writer.writerow(['Date', 'Utilisateur', 'Action', 'Details'])
-    for log in logs: writer.writerow([log.timestamp, log.username, log.action, log.details])
-    mem = io.BytesIO()
-    mem.write(proxy.getvalue().encode('utf-8'))
-    mem.seek(0)
-    return send_file(mem, as_attachment=True, download_name="Audit_DorkNet.csv", mimetype='text/csv')
+# --- LANCEMENT ET INITIALISATION ---
+
+# Cette partie assure la création des tables au lancement sur Render
+with app.app_context():
+    try:
+        db.create_all()
+        print("✅ Base de données DorkNet_CryptoVault initialisée avec succès.")
+    except Exception as e:
+        print(f"❌ Erreur lors de l'initialisation de la DB : {e}")
 
 if __name__ == '__main__':
-    with app.app_context(): db.create_all()
-    app.run(debug=True)
+    # Configuration pour Render (port dynamique)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
