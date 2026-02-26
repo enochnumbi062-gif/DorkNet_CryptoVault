@@ -6,7 +6,7 @@
     <title>DorkNet CryptoVault - Terminal Sécurisé</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root { --primary: #00ff41; --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --danger: #f85149; }
+        :root { --primary: #00ff41; --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --danger: #f85149; --info: #58a6ff; }
         body { background-color: var(--bg); color: var(--text); font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; padding: 50px 20px; }
         .container { background: var(--card); padding: 2.5rem; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.7); width: 100%; max-width: 750px; border: 1px solid var(--border); }
         .banner { text-align: center; margin-bottom: 30px; border: 2px solid var(--primary); padding: 20px; border-radius: 8px; background: rgba(0, 255, 65, 0.05); }
@@ -17,10 +17,13 @@
         button:hover { background: #00cc33; filter: brightness(1.2); box-shadow: 0 0 15px rgba(0, 255, 65, 0.4); }
         .btn-sm-action { text-decoration: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; display: inline-block; }
         .btn-sm-action:hover { background: var(--primary); color: black; }
+        .btn-csv { text-decoration: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--info); color: var(--info); transition: 0.3s; display: inline-block; margin-right: 5px; }
+        .btn-csv:hover { background: var(--info); color: white; }
         .flash { padding: 12px; border-radius: 6px; margin-bottom: 20px; text-align: center; font-weight: bold; }
         .flash-success { background: rgba(0, 43, 54, 0.8); border: 1px solid var(--primary); color: var(--primary); }
         .flash-danger { background: rgba(45, 0, 0, 0.8); border: 1px solid var(--danger); color: var(--danger); }
-        .logout-link { color: var(--danger); text-decoration: none; font-size: 0.9rem; float: right; }
+        .logout-link { color: var(--danger); text-decoration: none; font-size: 0.9rem; float: right; cursor: pointer; font-weight: bold; }
+        .logout-link:hover { text-decoration: underline; }
         .log-container { background-color: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 15px; max-height: 200px; overflow-y: auto; }
         table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px;}
         th { text-align: left; border-bottom: 1px solid #333; padding: 10px; color: var(--primary); }
@@ -45,7 +48,9 @@
 
         {% if current_user.is_authenticated %}
             <div class="user-panel">
-                <a href="{{ url_for('logout') }}" class="logout-link"><i class="fas fa-sign-out-alt"></i> Quitter le Terminal</a>
+                <a href="javascript:void(0);" onclick="confirmLogout()" class="logout-link">
+                    <i class="fas fa-sign-out-alt"></i> Quitter le Terminal
+                </a>
                 <p>Opérateur: <span style="color:var(--primary); font-weight: bold;">{{ current_user.username }}</span></p>
                 
                 <section style="margin-top: 30px;">
@@ -61,7 +66,12 @@
                 <section style="margin-top: 40px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
                         <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud</h3>
-                        <a href="{{ url_for('admin_logs') }}" class="btn-sm-action">Panel Admin</a>
+                        <div>
+                            <a href="{{ url_for('export_logs') }}" class="btn-csv">
+                                <i class="fas fa-file-csv me-1"></i> Exporter CSV
+                            </a>
+                            <a href="{{ url_for('admin_logs') }}" class="btn-sm-action">Panel Admin</a>
+                        </div>
                     </div>
                     <table>
                         <thead><tr><th>Archive (.enc)</th><th>Taille</th><th style="text-align: right;">Actions</th></tr></thead>
@@ -121,6 +131,13 @@
     </div>
 
     <script>
+        // LOGIQUE DE CONFIRMATION DE DÉCONNEXION
+        function confirmLogout() {
+            if (confirm("⚠️ Alerte de sécurité : Voulez-vous vraiment fermer la session DorkNet CryptoVault ?")) {
+                window.location.href = "{{ url_for('logout') }}";
+            }
+        }
+
         async function encryptFileBeforeUpload(file, userKey) {
             const enc = new TextEncoder();
             const keyMaterial = await window.crypto.subtle.importKey("raw", enc.encode(userKey), {name: "PBKDF2"}, false, ["deriveKey"]);
