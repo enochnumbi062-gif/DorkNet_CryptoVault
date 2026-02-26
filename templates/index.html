@@ -4,61 +4,107 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DorkNet CryptoVault</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root { --primary: #00ff41; --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; }
+        :root { --primary: #00ff41; --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --danger: #f85149; }
         body { background-color: var(--bg); color: var(--text); font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; padding: 50px 20px; }
-        .container { background: var(--card); padding: 2rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 100%; max-width: 600px; border: 1px solid var(--border); }
-        h1 { color: var(--primary); text-align: center; font-size: 1.6rem; letter-spacing: 2px; }
-        h3 { border-bottom: 1px solid var(--border); padding-bottom: 10px; font-size: 1.1rem; color: var(--primary); }
+        .container { background: var(--card); padding: 2rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 100%; max-width: 700px; border: 1px solid var(--border); }
+        h1 { color: var(--primary); text-align: center; font-size: 1.6rem; letter-spacing: 2px; text-transform: uppercase; }
+        h3 { border-bottom: 1px solid var(--border); padding-bottom: 10px; font-size: 1.1rem; color: var(--primary); display: flex; align-items: center; gap: 10px; }
+        
         input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid var(--border); background: #0d1117; color: white; box-sizing: border-box; }
         button { background: var(--primary); color: black; font-weight: bold; cursor: pointer; border: none; transition: 0.3s; }
         button:hover { background: #00cc33; filter: brightness(1.2); }
-        .file-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #1c2128; margin-bottom: 8px; border-radius: 6px; border: 1px solid var(--border); }
-        .btn-download { color: var(--primary); text-decoration: none; font-size: 0.85rem; border: 1px solid var(--primary); padding: 4px 8px; border-radius: 4px; }
-        .logout-link { color: #f85149; text-decoration: none; font-size: 0.9rem; float: right; }
-        .log-container { background-color: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 15px; max-height: 250px; overflow-y: auto; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-        th { text-align: left; border-bottom: 1px solid #333; padding: 8px; color: var(--primary); }
-        td { padding: 8px; border-bottom: 1px solid #1a1a1a; }
+        
+        .btn-sm-action { text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; }
+        .btn-sm-action:hover { background: var(--primary); color: black; }
+        .btn-danger-outline { border-color: var(--danger); color: var(--danger); }
+        .btn-danger-outline:hover { background: var(--danger); color: white; }
+
+        .logout-link { color: var(--danger); text-decoration: none; font-size: 0.9rem; float: right; }
+        .log-container { background-color: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 15px; max-height: 200px; overflow-y: auto; }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; }
+        th { text-align: left; border-bottom: 1px solid #333; padding: 10px; color: var(--primary); }
+        td { padding: 10px; border-bottom: 1px solid #1a1a1a; vertical-align: middle; }
         .badge { background: #003311; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--primary); font-size: 0.75rem; }
+        
+        .flash { background: #002b36; border: 1px solid var(--primary); color: var(--primary); padding: 10px; border-radius: 6px; margin-bottom: 20px; text-align: center; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>DorkNet CryptoVault</h1>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            {% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}
+          {% endif %}
+        {% endwith %}
+
         {% if current_user.is_authenticated %}
             <div class="user-panel">
-                <a href="/logout" class="logout-link">Déconnexion</a>
+                <a href="/logout" class="logout-link"><i class="fas fa-sign-out-alt"></i> Déconnexion</a>
                 <p>Opérateur: <span style="color:var(--primary)">{{ current_user.username }}</span></p>
+                
                 <section style="margin-top: 30px;">
-                    <h3>Sécuriser un fichier</h3>
+                    <h3><i class="fas fa-lock"></i> Sécuriser un fichier</h3>
                     <form action="/upload" method="post" enctype="multipart/form-data">
                         <input type="file" name="file" required>
-                        <button type="submit">Lancer le chiffrement AES-256</button>
+                        <button type="submit">Lancer le chiffrement AES-256 & Cloud</button>
                     </form>
                 </section>
-                <section style="margin-top: 30px;">
-                    <h3>Coffre-fort</h3>
-                    {% for file in files %}
-                        <div class="file-item">
-                            <span style="font-size: 0.85rem; color: #8b949e;">{{ file }}</span>
-                            <a href="{{ url_for('download', filename=file) }}" class="btn-download">Déchiffrer</a>
-                        </div>
-                    {% else %}<p style="font-style: italic; color: #555; text-align: center;">Vide.</p>{% endfor %}
+
+                <section style="margin-top: 40px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
+                        <h3 style="border:none;"><i class="fas fa-cloud"></i>Archives Cloud DorkNet</h3>
+                        <a href="/archives" class="btn-sm-action" style="margin-bottom:10px;">Actualiser la liste</a>
+                    </div>
+                    
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nom (.enc)</th>
+                                <th>Taille</th>
+                                <th class="text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file in files %}
+                            <tr>
+                                <td style="color: #aaa;">{{ file.public_id }}</td>
+                                <td>{{ file.size }}</td>
+                                <td style="text-align: right; display: flex; gap: 5px; justify-content: flex-end;">
+                                    <a href="{{ file.url }}" class="btn-sm-action" title="Récupérer">
+                                        <i class="fas fa-download"></i>
+                                    </td>
+                                    <a href="{{ url_for('delete_cloud', public_id=file.public_id) }}" 
+                                       class="btn-sm-action btn-danger-outline" 
+                                       onclick="return confirm('Supprimer ce fichier du Cloud ?');"
+                                       title="Supprimer">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="3" style="text-align: center; font-style: italic; color: #555;">Aucun fichier sécurisé dans le cloud.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </section>
+
                 <section style="margin-top: 40px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <h3>Journal d'Audit</h3>
-                        <a href="/export_logs" style="color: var(--primary); text-decoration: none; border: 1px solid var(--primary); padding: 5px 10px; border-radius: 4px; font-size: 0.7rem;">Exporter CSV</a>
+                        <h3><i class="fas fa-list-ul"></i>Journal d'Audit</h3>
+                        <a href="/export_logs" class="btn-sm-action">Exporter CSV</a>
                     </div>
                     <div class="log-container">
                         <table>
-                            <thead><tr><th>Date</th><th>Action</th><th>Détails</th></tr></thead>
                             <tbody>
                                 {% for log in logs %}
                                 <tr>
-                                    <td style="color: #666;">{{ log.timestamp.strftime('%H:%M:%S') }}</td>
-                                    <td><span class="badge">{{ log.action }}</span></td>
+                                    <td style="color: #666; width: 80px;">{{ log.timestamp.strftime('%H:%M:%S') }}</td>
+                                    <td style="width: 120px;"><span class="badge">{{ log.action }}</span></td>
                                     <td style="color: #aaa;">{{ log.details }}</td>
                                 </tr>
                                 {% endfor %}
@@ -69,9 +115,17 @@
             </div>
         {% else %}
             <div class="auth-panel">
-                <form action="/login" method="post"><input type="text" name="username" placeholder="Pseudo" required><input type="password" name="password" placeholder="Pass" required><button type="submit">S'identifier</button></form>
+                <form action="/login" method="post">
+                    <input type="text" name="username" placeholder="Pseudo" required>
+                    <input type="password" name="password" placeholder="Pass" required>
+                    <button type="submit">S'identifier</button>
+                </form>
                 <div style="text-align: center; margin: 20px 0; color: #555;">— OU —</div>
-                <form action="/register" method="post"><input type="text" name="username" placeholder="Nouveau pseudo" required><input type="password" name="password" placeholder="Nouveau pass" required><button type="submit" style="background:#21262d; color:white; border: 1px solid var(--border);">Créer un accès</button></form>
+                <form action="/register" method="post">
+                    <input type="text" name="username" placeholder="Nouveau pseudo" required>
+                    <input type="password" name="password" placeholder="Nouveau pass" required>
+                    <button type="submit" style="background:#21262d; color:white; border: 1px solid var(--border);">Créer un accès</button>
+                </form>
             </div>
         {% endif %}
     </div>
