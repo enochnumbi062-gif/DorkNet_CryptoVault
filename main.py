@@ -49,11 +49,11 @@ login_manager.login_view = 'index'
 # --- ÉTAT DU SYSTÈME (KILL SWITCH) ---
 SYSTEM_ACTIVE = True 
 
-# --- CONFIGURATION CLOUDINARY ---
+# --- CONFIGURATION CLOUDINARY (CORRIGÉE AVEC .STRIP()) ---
 cloudinary.config(
-  cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
-  api_key = os.getenv('CLOUDINARY_API_KEY'),
-  api_secret = os.getenv('CLOUDINARY_API_SECRET')
+  cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME', '').strip(),
+  api_key = os.environ.get('CLOUDINARY_API_KEY', '').strip(),
+  api_secret = os.environ.get('CLOUDINARY_API_SECRET', '').strip()
 )
 
 # --- CONFIGURATION EMAIL & SCHEDULER ---
@@ -189,10 +189,9 @@ def upload():
     file = request.files.get('file')
     if file:
         try:
-            # Lecture du fichier (chiffré côté client par AES-GCM)
             file_content = file.read()
             
-            # Correction cruciale : force le format 'raw' pour les fichiers .enc
+            # Envoi forcé en mode 'raw' pour les archives chiffrées .enc
             upload_result = cloudinary.uploader.upload(
                 file_content,
                 resource_type="raw",
@@ -204,7 +203,7 @@ def upload():
             db.session.add(AuditLog(
                 username=current_user.username, 
                 action="UPLOAD_SUCCESS", 
-                details=f"Fichier {file.filename} envoyé avec succès sur Cloudinary."
+                details=f"Fichier {file.filename} envoyé avec succès."
             ))
             db.session.commit()
             flash('Succès ! Le fichier est désormais dans le Cloud.', "success")
@@ -217,15 +216,7 @@ def upload():
 @app.route('/download_cloud/<path:public_id>')
 @login_required
 def download_cloud(public_id):
-    if "passwords_importants" in public_id.lower():
-        error_msg = f"⚠️ INTRUSION par @{current_user.username}."
-        db.session.add(AuditLog(username=current_user.username, action="HONEYTOKEN_TRIGGER", details=error_msg))
-        db.session.commit()
-        send_critical_alert("HONEYTOKEN_TRIGGERED", error_msg)
-        flash("🚫 Erreur critique de sécurité.", "danger")
-        return redirect(url_for('index'))
     try:
-        # Récupération en mode 'raw'
         res = cloudinary.api.resource(public_id, resource_type="raw")
         response = requests.get(res['secure_url'])
         return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
@@ -272,14 +263,14 @@ def trigger_kill_switch():
     flash("🚨 BASTION VERROUILLÉ.", "danger")
     return redirect(url_for('admin_logs'))
 
-# --- ROUTE PRINCIPALE ---
+# --- ROUTE PRINCIPALE (AFFICHAGE DES FICHIERS) ---
 
 @app.route('/')
 def index():
     cloud_files = []
     if current_user.is_authenticated:
         try:
-            # Force la recherche des fichiers de type 'raw' (vos .enc)
+            # Recherche spécifique des ressources 'raw'
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
                 cloud_files = [
