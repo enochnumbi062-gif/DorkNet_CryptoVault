@@ -7,100 +7,93 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root { --primary: #00ff41; --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --danger: #f85149; }
-        
         body { background-color: var(--bg); color: var(--text); font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; padding: 50px 20px; }
-        
         .container { background: var(--card); padding: 2.5rem; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.7); width: 100%; max-width: 750px; border: 1px solid var(--border); }
-        
         .banner { text-align: center; margin-bottom: 30px; border: 2px solid var(--primary); padding: 20px; border-radius: 8px; background: rgba(0, 255, 65, 0.05); }
         h1 { margin: 0; font-size: 2rem; color: var(--primary); text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 10px rgba(0, 255, 65, 0.5); }
         h3 { border-bottom: 1px solid var(--border); padding-bottom: 10px; font-size: 1.1rem; color: var(--primary); display: flex; align-items: center; gap: 10px; }
-        
         input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid var(--border); background: #0d1117; color: white; box-sizing: border-box; }
         button { background: var(--primary); color: black; font-weight: bold; cursor: pointer; border: none; transition: 0.3s; text-transform: uppercase; }
         button:hover { background: #00cc33; filter: brightness(1.2); box-shadow: 0 0 15px rgba(0, 255, 65, 0.4); }
-        
         .btn-sm-action { text-decoration: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; display: inline-block; }
         .btn-sm-action:hover { background: var(--primary); color: black; }
-        
         .flash { padding: 12px; border-radius: 6px; margin-bottom: 20px; text-align: center; font-weight: bold; }
         .flash-success { background: rgba(0, 43, 54, 0.8); border: 1px solid var(--primary); color: var(--primary); }
         .flash-danger { background: rgba(45, 0, 0, 0.8); border: 1px solid var(--danger); color: var(--danger); }
-        
         .logout-link { color: var(--danger); text-decoration: none; font-size: 0.9rem; float: right; }
         .log-container { background-color: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 15px; max-height: 200px; overflow-y: auto; }
         table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px;}
         th { text-align: left; border-bottom: 1px solid #333; padding: 10px; color: var(--primary); }
         td { padding: 10px; border-bottom: 1px solid #1a1a1a; vertical-align: middle; }
         .badge { background: #003311; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--primary); font-size: 0.75rem; }
-        
-        #encryption-status { font-size: 0.8rem; color: #e1b12c; display: none; margin-top: 5px; }
-        
-        /* Style spécifique pour l'effet néon demandé */
         .neon-text { text-align: center; margin: 30px 0; color: #F5F5F5; font-weight: bold; text-shadow: 0 0 10px #00d4ff; letter-spacing: 2px; }
+        #encryption-status { font-size: 0.8rem; color: #e1b12c; display: none; margin-top: 5px; }
     </style>
 </head>
 <body>
     <div class="container">
-        
         <div class="banner">
             <h1><i class="fas fa-network-wired"></i> DORKNET <span style="font-weight: 300;">CRYPTOVAULT</span></h1>
             <small style="color: var(--primary); letter-spacing: 5px; display: block; margin-top: 10px;">CRYPTOGRAPHIC VAULT v2.0</small>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, message in messages %}
-                <div class="flash flash-{{ category }}">{{ message }}</div>
-            {% endfor %}
-          {% endif %}
+          {% if messages %}{% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}{% endif %}
         {% endwith %}
 
         {% if current_user.is_authenticated %}
             <div class="user-panel">
-                <a href="/logout" class="logout-link"><i class="fas fa-sign-out-alt"></i> Déconnexion</a>
+                <a href="/logout" class="logout-link"><i class="fas fa-sign-out-alt"></i> Quitter le Terminal</a>
                 <p>Opérateur: <span style="color:var(--primary); font-weight: bold;">{{ current_user.username }}</span></p>
                 
                 <section style="margin-top: 30px;">
-                    <h3><i class="fas fa-lock"></i> Sécuriser un fichier</h3>
+                    <h3><i class="fas fa-lock"></i> Chiffrement Client-Side AES-GCM</h3>
                     <form id="secure-upload-form">
                         <input type="file" id="file-input" required>
-                        <input type="password" id="client-pass" placeholder="Clé de chiffrement locale (Zero-Knowledge)" required>
-                        <button type="submit">Lancer le chiffrement AES-256 & Cloud</button>
+                        <input type="password" id="client-pass" placeholder="Clé de chiffrement locale (Non envoyée au serveur)" required>
+                        <button type="submit" id="btn-upload">Lancer le Chiffrement & Upload</button>
                         <div id="encryption-status"><i class="fas fa-spinner fa-spin"></i> Chiffrement local en cours...</div>
                     </form>
                 </section>
 
                 <section style="margin-top: 40px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
-                        <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud DorkNet</h3>
-                        <a href="/" class="btn-sm-action"><i class="fas fa-sync"></i> Actualiser</a>
+                        <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud</h3>
+                        <a href="/admin/logs" class="btn-sm-action">Panel Admin</a>
                     </div>
-                    
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Nom (.enc)</th>
-                                <th>Taille</th>
-                                <th style="text-align: right;">Actions</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Archive (.enc)</th><th>Taille</th><th style="text-align: right;">Actions</th></tr></thead>
                         <tbody>
                             {% for file in files %}
                             <tr>
-                                <td style="color: #aaa; font-size: 0.75rem; font-family: monospace;">{{ file.public_id }}</td>
+                                <td style="color: #aaa; font-size: 0.75rem;">{{ file.public_id }}</td>
                                 <td>{{ file.size }}</td>
                                 <td style="text-align: right;">
-                                    <a href="{{ url_for('download_cloud', public_id=file.public_id) }}" class="btn-sm-action" title="Déchiffrer et Télécharger">
-                                        <i class="fas fa-file-download"></i>
-                                    </a>
+                                    <a href="{{ url_for('download_cloud', public_id=file.public_id) }}" class="btn-sm-action"><i class="fas fa-file-download"></i></a>
                                 </td>
                             </tr>
-                            {% else %}
-                            <tr><td colspan="3" style="text-align: center; font-style: italic; color: #555;">Aucune archive détectée.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
+                </section>
+
+                <section style="margin-top: 40px;">
+                    <h3><i class="fas fa-list-ul"></i> Journal d'Audit</h3>
+                    <div class="log-container">
+                        <table>
+                            <tbody>
+                                {% for log in logs %}
+                                <tr>
+                                    <td style="color: #666; width: 80px;">{{ log.timestamp.strftime('%H:%M:%S') }}</td>
+                                    <td><span class="badge">{{ log.action }}</span></td>
+                                    <td style="color: #aaa;">{{ log.details }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                 </section>
             </div>
         {% else %}
@@ -111,15 +104,11 @@
                     <input type="password" name="password" placeholder="Mot de passe" required>
                     <button type="submit">Accéder au Terminal</button>
                 </form>
-                
-                <div class="neon-text">
-                    [ INITIALISATION NOUVEAU COMPTE ]
-                </div>
-                
+                <div class="neon-text">[ INITIALISATION NOUVEAU COMPTE ]</div>
                 <form action="/register" method="post">
-                    <input type="text" name="username" placeholder="Nouveau pseudo" required>
-                    <input type="password" name="password" placeholder="Définir un mot de passe" required>
-                    <input type="password" name="pin" placeholder="Définir PIN Secret (2FA)" maxlength="6" required>
+                    <input type="text" name="username" placeholder="Pseudo" required>
+                    <input type="password" name="password" placeholder="Mot de passe" required>
+                    <input type="password" name="pin" placeholder="PIN 2FA" maxlength="6" required>
                     <button type="submit" style="background:#21262d; color:var(--primary); border: 1px solid var(--primary);">Générer Accès Sécurisé</button>
                 </form>
             </div>
@@ -127,37 +116,18 @@
 
         <section style="margin-top: 50px; padding-top: 20px; border-top: 1px dashed var(--border); color: #8b949e; font-size: 0.85rem;">
             <h3 style="font-size: 0.9rem; border:none;"><i class="fas fa-info-circle"></i> À PROPOS DE DORKNET CRYPTOVAULT</h3>
-            <p>
-                Dirigé par le <strong>Dr Enoch Numbi</strong>, ce système déploie une architecture 
-                <em>Zero-Knowledge</em> utilisant le chiffrement <strong>AES-256-EAX</strong>. 
-                Chaque transfert est audité et sécurisé par une double barrière d'authentification 
-                pour garantir une souveraineté numérique totale.
-            </p>
+            <p>Dirigé par le <strong>Dr Enoch Numbi</strong>, ce système déploie une architecture <em>Zero-Knowledge</em> utilisant le chiffrement <strong>AES-256-EAX</strong>.</p>
         </section>
-
-        <footer style="margin-top: 20px; color: #8b949e; font-size: 0.8rem; text-align: center;">
-            <p><strong>DorkNet CryptoVault</strong> : Système à connaissance nulle. Aucune donnée n'est accessible sans l'accord de l'opérateur principal.</p>
-        </footer>
     </div>
 
     <script>
         async function encryptFileBeforeUpload(file, userKey) {
             const enc = new TextEncoder();
-            const keyMaterial = await window.crypto.subtle.importKey(
-                "raw", enc.encode(userKey), {name: "PBKDF2"}, false, ["deriveKey"]
-            );
-            
-            const key = await window.crypto.subtle.deriveKey(
-                {name: "PBKDF2", salt: enc.encode("DorkNet-Salt-Numbi"), iterations: 100000, hash: "SHA-256"},
-                keyMaterial, {name: "AES-GCM", length: 256}, false, ["encrypt"]
-            );
-
+            const keyMaterial = await window.crypto.subtle.importKey("raw", enc.encode(userKey), {name: "PBKDF2"}, false, ["deriveKey"]);
+            const key = await window.crypto.subtle.deriveKey({name: "PBKDF2", salt: enc.encode("DorkNet-Salt-Numbi"), iterations: 100000, hash: "SHA-256"}, keyMaterial, {name: "AES-GCM", length: 256}, false, ["encrypt"]);
             const iv = window.crypto.getRandomValues(new Uint8Array(12));
             const data = await file.arrayBuffer();
-            const encryptedContent = await window.crypto.subtle.encrypt(
-                {name: "AES-GCM", iv: iv}, key, data
-            );
-
+            const encryptedContent = await window.crypto.subtle.encrypt({name: "AES-GCM", iv: iv}, key, data);
             return new Blob([iv, new Uint8Array(encryptedContent)], {type: "application/octet-stream"});
         }
 
@@ -165,24 +135,17 @@
         if(form) {
             form.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const fileInput = document.getElementById('file-input');
-                const keyInput = document.getElementById('client-pass');
+                const fInput = document.getElementById('file-input');
+                const kInput = document.getElementById('client-pass');
                 const status = document.getElementById('encryption-status');
-
-                if (fileInput.files.length > 0) {
+                if (fInput.files.length > 0) {
                     status.style.display = 'block';
-                    const encryptedBlob = await encryptFileBeforeUpload(fileInput.files[0], keyInput.value);
-                    
+                    const blob = await encryptFileBeforeUpload(fInput.files[0], kInput.value);
                     const formData = new FormData();
-                    formData.append('file', encryptedBlob, fileInput.files[0].name + '.enc');
-
-                    const response = await fetch('/upload', {
-                        method: 'POST',
-                        body: formData
-                    });
-
+                    formData.append('file', blob, fInput.files[0].name + '.enc');
+                    const response = await fetch('/upload', { method: 'POST', body: formData });
                     if (response.ok) { window.location.reload(); }
-                    else { alert("Échec de l'upload sécurisé."); status.style.display = 'none'; }
+                    else { alert("Erreur upload"); status.style.display = 'none'; }
                 }
             });
         }
