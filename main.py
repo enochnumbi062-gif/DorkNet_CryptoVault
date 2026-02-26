@@ -231,6 +231,31 @@ def admin_logs():
     all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
     return render_template('admin_logs.html', logs=all_logs)
 
+@app.route('/admin/export_logs')
+@login_required
+@admin_required
+def export_logs():
+    all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
+    
+    # Création du buffer en mémoire
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # En-tête du CSV
+    writer.writerow(['ID', 'Timestamp', 'Operateur', 'Action', 'Details'])
+    
+    for log in all_logs:
+        writer.writerow([log.id, log.timestamp, log.username, log.action, log.details])
+    
+    output.seek(0)
+    
+    return send_file(
+        io.BytesIO(output.getvalue().encode('utf-8')),
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name=f"DorkNet_Audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
+
 @app.route('/admin/killswitch', methods=['POST'])
 @login_required
 @admin_required
