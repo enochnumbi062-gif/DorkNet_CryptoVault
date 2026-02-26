@@ -11,24 +11,19 @@
         .container { background: var(--card); padding: 2rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 100%; max-width: 700px; border: 1px solid var(--border); }
         h1 { color: var(--primary); text-align: center; font-size: 1.6rem; letter-spacing: 2px; text-transform: uppercase; }
         h3 { border-bottom: 1px solid var(--border); padding-bottom: 10px; font-size: 1.1rem; color: var(--primary); display: flex; align-items: center; gap: 10px; }
-        
         input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid var(--border); background: #0d1117; color: white; box-sizing: border-box; }
         button { background: var(--primary); color: black; font-weight: bold; cursor: pointer; border: none; transition: 0.3s; }
         button:hover { background: #00cc33; filter: brightness(1.2); }
-        
-        .btn-sm-action { text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; }
+        .btn-sm-action { text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; display: inline-block; }
         .btn-sm-action:hover { background: var(--primary); color: black; }
         .btn-danger-outline { border-color: var(--danger); color: var(--danger); }
         .btn-danger-outline:hover { background: var(--danger); color: white; }
-
         .logout-link { color: var(--danger); text-decoration: none; font-size: 0.9rem; float: right; }
         .log-container { background-color: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 15px; max-height: 200px; overflow-y: auto; }
-        
         table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; }
         th { text-align: left; border-bottom: 1px solid #333; padding: 10px; color: var(--primary); }
         td { padding: 10px; border-bottom: 1px solid #1a1a1a; vertical-align: middle; }
         .badge { background: #003311; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--primary); font-size: 0.75rem; }
-        
         .flash { background: #002b36; border: 1px solid var(--primary); color: var(--primary); padding: 10px; border-radius: 6px; margin-bottom: 20px; text-align: center; }
     </style>
 </head>
@@ -58,7 +53,7 @@
                 <section style="margin-top: 40px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
                         <h3 style="border:none;"><i class="fas fa-cloud"></i>Archives Cloud DorkNet</h3>
-                        <a href="/archives" class="btn-sm-action" style="margin-bottom:10px;">Actualiser la liste</a>
+                        <a href="/" class="btn-sm-action" style="margin-bottom:10px;"><i class="fas fa-sync"></i> Actualiser</a>
                     </div>
                     
                     <table>
@@ -66,21 +61,21 @@
                             <tr>
                                 <th>Nom (.enc)</th>
                                 <th>Taille</th>
-                                <th class="text-center">Actions</th>
+                                <th style="text-align: right;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for file in files %}
                             <tr>
-                                <td style="color: #aaa;">{{ file.public_id }}</td>
+                                <td style="color: #aaa; font-size: 0.75rem;">{{ file.public_id }}</td>
                                 <td>{{ file.size }}</td>
-                                <td style="text-align: right; display: flex; gap: 5px; justify-content: flex-end;">
-                                    <a href="{{ file.url }}" class="btn-sm-action" title="Récupérer">
-                                        <i class="fas fa-download"></i>
-                                    </td>
+                                <td style="text-align: right;">
+                                    <a href="{{ url_for('download_cloud', public_id=file.public_id) }}" class="btn-sm-action" title="Déchiffrer et Télécharger">
+                                        <i class="fas fa-file-download"></i>
+                                    </a>
                                     <a href="{{ url_for('delete_cloud', public_id=file.public_id) }}" 
                                        class="btn-sm-action btn-danger-outline" 
-                                       onclick="return confirm('Supprimer ce fichier du Cloud ?');"
+                                       onclick="return confirm('Supprimer définitivement ce fichier du Cloud ?');"
                                        title="Supprimer">
                                         <i class="fas fa-trash-alt"></i>
                                     </a>
@@ -95,7 +90,7 @@
 
                 <section style="margin-top: 40px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <h3><i class="fas fa-list-ul"></i>Journal d'Audit</h3>
+                        <h3><i class="fas fa-list-ul"></i> Journal d'Audit</h3>
                         <a href="/export_logs" class="btn-sm-action">Exporter CSV</a>
                     </div>
                     <div class="log-container">
