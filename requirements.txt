@@ -8,3 +8,5 @@ pycryptodome
 requests
 werkzeug
 gunicorn
+flask-mail
+flask-apscheduler
