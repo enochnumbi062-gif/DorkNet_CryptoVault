@@ -1,6 +1,7 @@
 import os
 import io
 import csv
+import requests
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
@@ -119,9 +120,9 @@ def upload():
                 [f.write(x) for x in (nonce, tag, ciphertext)]
             
             # Upload vers Cloudinary
-            upload_result = cloudinary.uploader.upload(enc_filename, resource_type="raw")
+            cloudinary.uploader.upload(enc_filename, resource_type="raw")
             
-            # Nettoyage
+            # Nettoyage local
             if os.path.exists(enc_filename):
                 os.remove(enc_filename)
             
@@ -131,6 +132,38 @@ def upload():
         except Exception as e:
             flash(f'Erreur : {str(e)}')
     return redirect(url_for('index'))
+
+@app.route('/download_cloud/<path:public_id>')
+@login_required
+def download_cloud(public_id):
+    try:
+        # 1. Récupérer l'URL sécurisée du fichier sur Cloudinary
+        res = cloudinary.api.resource(public_id, resource_type="raw")
+        file_url = res['secure_url']
+        
+        # 2. Télécharger le contenu chiffré (.enc) en mémoire
+        response = requests.get(file_url)
+        enc_data = response.content
+        
+        # 3. Déchiffrement AES-256
+        nonce, tag, ciphertext = enc_data[:16], enc_data[16:32], enc_data[32:]
+        cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX, nonce=nonce)
+        decrypted_data = cipher.decrypt_and_verify(ciphertext, tag)
+        
+        # 4. Nettoyage du nom pour le téléchargement
+        original_name = public_id.replace('.enc', '')
+        
+        log = AuditLog(username=current_user.username, action="CLOUD_DECRYPT", details=f"Récupération déchiffrée : {original_name}")
+        db.session.add(log); db.session.commit()
+        
+        return send_file(
+            io.BytesIO(decrypted_data),
+            as_attachment=True,
+            download_name=original_name
+        )
+    except Exception as e:
+        flash(f"Erreur de déchiffrement : {str(e)}")
+        return redirect(url_for('index'))
 
 @app.route('/delete_cloud/<path:public_id>')
 @login_required
