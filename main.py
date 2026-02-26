@@ -16,7 +16,6 @@ from flask_apscheduler import APScheduler
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
-from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 
 # --- CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ---
@@ -49,11 +48,11 @@ login_manager.login_view = 'index'
 # --- ÉTAT DU SYSTÈME (KILL SWITCH) ---
 SYSTEM_ACTIVE = True 
 
-# --- CONFIGURATION CLOUDINARY ---
+# --- CONFIGURATION CLOUDINARY (CORRECTIF DR NUMBI) ---
 cloudinary.config(
-  cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
-  api_key = os.getenv('CLOUDINARY_API_KEY'),
-  api_secret = os.getenv('CLOUDINARY_API_SECRET')
+  cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME', '').strip(),
+  api_key = os.environ.get('CLOUDINARY_API_KEY', '').strip(),
+  api_secret = os.environ.get('CLOUDINARY_API_SECRET', '').strip()
 )
 
 # --- CONFIGURATION EMAIL & SCHEDULER ---
@@ -68,12 +67,6 @@ app.config.update(
 
 mail = Mail(app)
 scheduler = APScheduler()
-
-# --- SÉCURITÉ : CLÉ AES-256 (SERVEUR) ---
-aes_key_hex = os.getenv('AES_KEY')
-if not aes_key_hex:
-    aes_key_hex = get_random_bytes(32).hex()
-ENCRYPTION_KEY = bytes.fromhex(aes_key_hex)
 
 # --- MODÈLES DE DONNÉES ---
 class User(UserMixin, db.Model):
@@ -105,7 +98,7 @@ def admin_required(f):
 
 @app.before_request
 def check_kill_switch():
-    if not SYSTEM_ACTIVE and request.endpoint not in ['index', 'static', 'login', 'logout']:
+    if not SYSTEM_ACTIVE and request.endpoint not in ['index', 'static', 'login', 'logout', 'register']:
         return "<h1>⚠️ ACCÈS NEUTRALISÉ</h1><p>Le bastion DorkNet CryptoVault est en mode confinement de sécurité par le Dr Enoch Numbi.</p>", 503
 
 @app.after_request
@@ -115,17 +108,17 @@ def add_security_headers(response):
     response.headers['X-XSS-Protection'] = '1; mode=block'
     return response
 
-# --- ALERTES & AUDIT ---
+# --- ALERTES SÉCURITÉ ---
 
 def send_critical_alert(action, details):
     with app.app_context():
         try:
             msg = Message(
-                subject=f"🚨 [DORKNET CRYPTOVAULT] VIOLATION DÉTECTÉE : {action}",
+                subject=f"🚨 [DORKNET] ALERTE SÉCURITÉ : {action}",
                 recipients=[os.getenv('MAIL_USER')],
-                extra_headers={'X-Priority': '1', 'Importance': 'high'}
+                extra_headers={'X-Priority': '1'}
             )
-            msg.html = f"""<div style='font-family: sans-serif; border: 2px solid #d9534f; padding: 20px;'><h2>ALERTE SÉCURITÉ</h2><p><b>Action:</b> {action}</p><p><b>Détails:</b> {details}</p></div>"""
+            msg.html = f"<b>Action:</b> {action}<br><b>Détails:</b> {details}"
             mail.send(msg)
         except Exception as e: print(f"❌ Erreur mail : {e}")
 
@@ -189,10 +182,8 @@ def upload():
     file = request.files.get('file')
     if file:
         try:
-            # Lecture du fichier (chiffré côté client par AES-GCM)
             file_content = file.read()
-            
-            # Correction cruciale : force le format 'raw' pour les fichiers .enc
+            # Force resource_type="raw" pour les fichiers chiffrés .enc
             upload_result = cloudinary.uploader.upload(
                 file_content,
                 resource_type="raw",
@@ -204,19 +195,19 @@ def upload():
             db.session.add(AuditLog(
                 username=current_user.username, 
                 action="UPLOAD_SUCCESS", 
-                details=f"Fichier {file.filename} envoyé avec succès sur Cloudinary."
+                details=f"Fichier {file.filename} envoyé avec succès."
             ))
             db.session.commit()
-            flash('Succès ! Le fichier est désormais dans le Cloud.', "success")
+            flash('Bastion mis à jour : Fichier envoyé avec succès !', "success")
             
         except Exception as e:
-            print(f"ERREUR CLOUDINARY : {str(e)}")
-            flash(f"Échec de l'envoi : {str(e)}", "danger")
+            flash(f"Erreur technique : {str(e)}", "danger")
     return redirect(url_for('index'))
 
 @app.route('/download_cloud/<path:public_id>')
 @login_required
 def download_cloud(public_id):
+    # Sécurité Honeytoken
     if "passwords_importants" in public_id.lower():
         error_msg = f"⚠️ INTRUSION par @{current_user.username}."
         db.session.add(AuditLog(username=current_user.username, action="HONEYTOKEN_TRIGGER", details=error_msg))
@@ -224,8 +215,9 @@ def download_cloud(public_id):
         send_critical_alert("HONEYTOKEN_TRIGGERED", error_msg)
         flash("🚫 Erreur critique de sécurité.", "danger")
         return redirect(url_for('index'))
+
     try:
-        # Récupération en mode 'raw'
+        # Récupération en mode 'raw' (indispensable pour les .enc)
         res = cloudinary.api.resource(public_id, resource_type="raw")
         response = requests.get(res['secure_url'])
         return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
@@ -266,7 +258,7 @@ def export_logs():
 def trigger_kill_switch():
     global SYSTEM_ACTIVE
     SYSTEM_ACTIVE = False
-    send_critical_alert("KILL_SWITCH_ACTIVATED", "Confinement manuel activé.")
+    send_critical_alert("KILL_SWITCH_ACTIVATED", "Confinement manuel activé par l'administrateur.")
     db.session.add(AuditLog(username=current_user.username, action="SYS_LOCKDOWN", details="Mode Silence Radio."))
     db.session.commit()
     flash("🚨 BASTION VERROUILLÉ.", "danger")
@@ -279,7 +271,7 @@ def index():
     cloud_files = []
     if current_user.is_authenticated:
         try:
-            # Force la recherche des fichiers de type 'raw' (vos .enc)
+            # Récupération des ressources brutes (.enc)
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
                 cloud_files = [
@@ -289,7 +281,7 @@ def index():
                     } for r in res['resources']
                 ]
         except Exception as e:
-            print(f"Erreur d'affichage Cloud : {e}")
+            print(f"Erreur d'affichage : {e}")
             
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
@@ -297,5 +289,6 @@ def index():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    port = int(os.environ.get("PORT", 5000))
+    # Configuration du port pour Render (10000) ou local (5000)
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
