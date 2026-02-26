@@ -189,17 +189,28 @@ def upload():
     file = request.files.get('file')
     if file:
         try:
-            cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX)
-            nonce = cipher.nonce
-            ciphertext, tag = cipher.encrypt_and_digest(file.read())
-            buffer = io.BytesIO()
-            [buffer.write(x) for x in (nonce, tag, ciphertext)]
-            buffer.seek(0)
-            cloudinary.uploader.upload(buffer, resource_type="raw", public_id=file.filename)
-            db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=file.filename))
+            # On lit le contenu du fichier (déjà chiffré par le navigateur via AES-GCM)
+            file_content = file.read()
+            
+            # Envoi vers Cloudinary en mode 'raw' pour accepter les extensions .enc
+            cloudinary.uploader.upload(
+                file_content, 
+                resource_type="raw", 
+                public_id=file.filename,
+                folder="DorkNet_Vault"
+            )
+            
+            db.session.add(AuditLog(
+                username=current_user.username, 
+                action="UPLOAD_SUCCESS", 
+                details=f"Fichier {file.filename} stocké sur Cloudinary"
+            ))
             db.session.commit()
-            flash('Fichier sécurisé et envoyé !', "success")
-        except Exception as e: flash(str(e), "danger")
+            
+            flash('Fichier sécurisé et envoyé sur Cloudinary !', "success")
+        except Exception as e:
+            print(f"Erreur Cloudinary : {str(e)}")
+            flash(f"Erreur technique : {str(e)}", "danger")
     return redirect(url_for('index'))
 
 @app.route('/download_cloud/<path:public_id>')
@@ -213,14 +224,14 @@ def download_cloud(public_id):
         flash("🚫 Erreur critique de sécurité.", "danger")
         return redirect(url_for('index'))
     try:
+        # Récupération de la ressource brute sur Cloudinary
         res = cloudinary.api.resource(public_id, resource_type="raw")
         response = requests.get(res['secure_url'])
-        enc_data = response.content
-        nonce, tag, ciphertext = enc_data[:16], enc_data[16:32], enc_data[32:]
-        cipher = AES.new(ENCRYPTION_KEY, AES.MODE_EAX, nonce=nonce)
-        decrypted_layer = cipher.decrypt_and_verify(ciphertext, tag)
-        return send_file(io.BytesIO(decrypted_layer), as_attachment=True, download_name=public_id)
-    except Exception as e: flash("🚫 Intégrité compromise.", "danger"); return redirect(url_for('index'))
+        # Le fichier téléchargé est renvoyé tel quel au client (car déjà chiffré en AES-GCM côté client)
+        return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
+    except Exception as e: 
+        flash("🚫 Échec de récupération du fichier.", "danger")
+        return redirect(url_for('index'))
 
 # --- ROUTES ADMIN ---
 
@@ -236,19 +247,12 @@ def admin_logs():
 @admin_required
 def export_logs():
     all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
-    
-    # Création du buffer en mémoire
     output = io.StringIO()
     writer = csv.writer(output)
-    
-    # En-tête du CSV
     writer.writerow(['ID', 'Timestamp', 'Operateur', 'Action', 'Details'])
-    
     for log in all_logs:
         writer.writerow([log.id, log.timestamp, log.username, log.action, log.details])
-    
     output.seek(0)
-    
     return send_file(
         io.BytesIO(output.getvalue().encode('utf-8')),
         mimetype='text/csv',
@@ -273,10 +277,18 @@ def index():
     cloud_files, logs = [], []
     if current_user.is_authenticated:
         try:
-            res = cloudinary.api.resources(resource_type="raw", type="upload", max_results=15)
-            cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res.get('resources', [])]
+            # Force la recherche des fichiers de type 'raw' (vos fichiers .enc chiffrés)
+            res = cloudinary.api.resources(resource_type="raw")
+            if 'resources' in res:
+                cloud_files = [
+                    {
+                        'public_id': r['public_id'], 
+                        'size': f"{r['bytes']/1024:.1f} KB"
+                    } for r in res['resources']
+                ]
             logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all()
-        except: pass
+        except Exception as e:
+            print(f"Erreur de lecture Cloud : {e}")
     return render_template('index.html', files=cloud_files, logs=logs)
 
 if __name__ == '__main__':
