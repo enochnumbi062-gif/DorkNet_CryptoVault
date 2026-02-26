@@ -3,47 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DorkNet CryptoVault</title>
+    <title>DorkNet CryptoVault | Xchange</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root { --primary: #00ff41; --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --danger: #f85149; }
+        
         body { background-color: var(--bg); color: var(--text); font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; padding: 50px 20px; }
-        .container { background: var(--card); padding: 2rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 100%; max-width: 700px; border: 1px solid var(--border); }
-        h1 { color: var(--primary); text-align: center; font-size: 1.6rem; letter-spacing: 2px; text-transform: uppercase; }
+        
+        .container { background: var(--card); padding: 2.5rem; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.7); width: 100%; max-width: 750px; border: 1px solid var(--border); }
+        
+        /* BANNIÈRE & LOGO */
+        .banner { text-align: center; margin-bottom: 30px; border: 2px solid var(--primary); padding: 20px; border-radius: 8px; background: rgba(0, 255, 65, 0.05); }
+        h1 { margin: 0; font-size: 2rem; color: var(--primary); text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 10px rgba(0, 255, 65, 0.5); transition: 0.3s; }
+        h1:hover { text-shadow: 0 0 20px rgba(0, 255, 65, 0.8); transform: scale(1.02); }
         h3 { border-bottom: 1px solid var(--border); padding-bottom: 10px; font-size: 1.1rem; color: var(--primary); display: flex; align-items: center; gap: 10px; }
+        
+        /* FORMULAIRES & INPUTS */
         input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid var(--border); background: #0d1117; color: white; box-sizing: border-box; }
-        button { background: var(--primary); color: black; font-weight: bold; cursor: pointer; border: none; transition: 0.3s; }
-        button:hover { background: #00cc33; filter: brightness(1.2); }
-        .btn-sm-action { text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; display: inline-block; }
+        button { background: var(--primary); color: black; font-weight: bold; cursor: pointer; border: none; transition: 0.3s; text-transform: uppercase; }
+        button:hover { background: #00cc33; filter: brightness(1.2); box-shadow: 0 0 15px rgba(0, 255, 65, 0.4); }
+        
+        /* ACTIONS & BOUTONS SECONDAIRES */
+        .btn-sm-action { text-decoration: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; display: inline-block; }
         .btn-sm-action:hover { background: var(--primary); color: black; }
         .btn-danger-outline { border-color: var(--danger); color: var(--danger); }
         .btn-danger-outline:hover { background: var(--danger); color: white; }
+        
+        /* ALERTES FLASH */
+        .flash { padding: 12px; border-radius: 6px; margin-bottom: 20px; text-align: center; font-weight: bold; }
+        .flash-success { background: rgba(0, 43, 54, 0.8); border: 1px solid var(--primary); color: var(--primary); }
+        .flash-danger { background: rgba(45, 0, 0, 0.8); border: 1px solid var(--danger); color: var(--danger); }
+        
+        /* TABLEAUX & LOGS */
         .logout-link { color: var(--danger); text-decoration: none; font-size: 0.9rem; float: right; }
         .log-container { background-color: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 15px; max-height: 200px; overflow-y: auto; }
         table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; }
         th { text-align: left; border-bottom: 1px solid #333; padding: 10px; color: var(--primary); }
         td { padding: 10px; border-bottom: 1px solid #1a1a1a; vertical-align: middle; }
         .badge { background: #003311; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--primary); font-size: 0.75rem; }
-        .flash { background: #002b36; border: 1px solid var(--primary); color: var(--primary); padding: 10px; border-radius: 6px; margin-bottom: 20px; text-align: center; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>DorkNet CryptoVault</h1>
+        
+        <div class="banner">
+            <h1><i class="fas fa-network-wired"></i> DORKNET <span style="font-weight: 300;">XCHANGE</span></h1>
+            <small style="color: var(--primary); letter-spacing: 5px;">CRYPTOGRAPHIC VAULT v2.0</small>
+        </div>
 
-        {% with messages = get_flashed_messages() %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
-            {% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
           {% endif %}
         {% endwith %}
 
         {% if current_user.is_authenticated %}
             <div class="user-panel">
                 <a href="/logout" class="logout-link"><i class="fas fa-sign-out-alt"></i> Déconnexion</a>
-                <p>Opérateur: <span style="color:var(--primary)">{{ current_user.username }}</span></p>
+                <p>Opérateur: <span style="color:var(--primary); font-weight: bold;">{{ current_user.username }}</span></p>
                 
+                <div style="text-align: right; margin-bottom: 20px;">
+                    <a href="/test_key" class="btn-sm-action" style="border-color: #e1b12c; color: #e1b12c;">
+                        <i class="fas fa-vial"></i> Tester l'intégrité de la clé
+                    </a>
+                </div>
+
                 <section style="margin-top: 30px;">
-                    <h3><i class="fas fa-lock"></i> Sécuriser un fichier</h3>
+                    <h3><i class="fas fa-lock"></i>Sécuriser un fichier</h3>
                     <form action="/upload" method="post" enctype="multipart/form-data">
                         <input type="file" name="file" required>
                         <button type="submit">Lancer le chiffrement AES-256 & Cloud</button>
@@ -67,7 +95,7 @@
                         <tbody>
                             {% for file in files %}
                             <tr>
-                                <td style="color: #aaa; font-size: 0.75rem;">{{ file.public_id }}</td>
+                                <td style="color: #aaa; font-size: 0.75rem; font-family: monospace;">{{ file.public_id }}</td>
                                 <td>{{ file.size }}</td>
                                 <td style="text-align: right;">
                                     <a href="{{ url_for('download_cloud', public_id=file.public_id) }}" class="btn-sm-action" title="Déchiffrer et Télécharger">
@@ -75,14 +103,14 @@
                                     </a>
                                     <a href="{{ url_for('delete_cloud', public_id=file.public_id) }}" 
                                        class="btn-sm-action btn-danger-outline" 
-                                       onclick="return confirm('Supprimer définitivement ce fichier du Cloud ?');"
+                                       onclick="return confirm('Confirmer la suppression définitive ?');"
                                        title="Supprimer">
                                         <i class="fas fa-trash-alt"></i>
                                     </a>
                                 </td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="3" style="text-align: center; font-style: italic; color: #555;">Aucun fichier sécurisé dans le cloud.</td></tr>
+                            <tr><td colspan="3" style="text-align: center; font-style: italic; color: #555;">Aucune archive détectée.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -111,15 +139,19 @@
         {% else %}
             <div class="auth-panel">
                 <form action="/login" method="post">
-                    <input type="text" name="username" placeholder="Pseudo" required>
-                    <input type="password" name="password" placeholder="Pass" required>
-                    <button type="submit">S'identifier</button>
+                    <h3>Identification</h3>
+                    <input type="text" name="username" placeholder="Pseudo Opérateur" required>
+                    <input type="password" name="password" placeholder="Mot de passe" required>
+                    <button type="submit">Accéder au Terminal</button>
                 </form>
-                <div style="text-align: center; margin: 20px 0; color: #555;">— OU —</div>
+                
+                <div style="text-align: center; margin: 30px 0; color: #30363d; font-weight: bold;">[ INITIALISATION NOUVEAU COMPTE ]</div>
+                
                 <form action="/register" method="post">
                     <input type="text" name="username" placeholder="Nouveau pseudo" required>
-                    <input type="password" name="password" placeholder="Nouveau pass" required>
-                    <button type="submit" style="background:#21262d; color:white; border: 1px solid var(--border);">Créer un accès</button>
+                    <input type="password" name="password" placeholder="Définir un mot de passe" required>
+                    <input type="password" name="pin" placeholder="Définir PIN Secret (2FA)" maxlength="6" required>
+                    <button type="submit" style="background:#21262d; color:var(--primary); border: 1px solid var(--primary);">Générer Accès Sécurisé</button>
                 </form>
             </div>
         {% endif %}
