@@ -71,7 +71,7 @@
                 </div>
 
                 <section style="margin-top: 30px;">
-                    <h3><i class="fas fa-lock"></i>Sécuriser un fichier</h3>
+                    <h3><i class="fas fa-lock"></i> Sécuriser un fichier</h3>
                     <form action="/upload" method="post" enctype="multipart/form-data">
                         <input type="file" name="file" required>
                         <button type="submit">Lancer le chiffrement AES-256 & Cloud</button>
@@ -80,7 +80,7 @@
 
                 <section style="margin-top: 40px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
-                        <h3 style="border:none;"><i class="fas fa-cloud"></i>Archives Cloud DorkNet</h3>
+                        <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud DorkNet</h3>
                         <a href="/" class="btn-sm-action" style="margin-bottom:10px;"><i class="fas fa-sync"></i> Actualiser</a>
                     </div>
                     
@@ -155,6 +155,17 @@
                 </form>
             </div>
         {% endif %}
+
+        <section style="margin-top: 50px; padding-top: 20px; border-top: 1px dashed var(--border); color: #8b949e; font-size: 0.85rem;">
+            <h3 style="font-size: 0.9rem; border:none;"><i class="fas fa-info-circle"></i> À PROPOS DE DORKNET XCHANGE</h3>
+            <p>
+                Dirigé par le <strong>Dr Enoch Numbi</strong>, ce système déploie une architecture 
+                <em>Zero-Knowledge</em> utilisant le chiffrement <strong>AES-256-EAX</strong>. 
+                Chaque transfert est audité et sécurisé par une double barrière d'authentification 
+                pour garantir une souveraineté numérique totale.
+            </p>
+        </section>
+
     </div>
 </body>
 </html>
