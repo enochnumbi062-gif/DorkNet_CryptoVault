@@ -4,21 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DorkNet CryptoVault - Terminal Sécurisé</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
-    
     <style>
         :root { --primary: #00ff41; --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --danger: #f85149; --info: #58a6ff; }
         body { background-color: var(--bg); color: var(--text); font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; padding: 50px 20px; }
-        .container { background: var(--card); padding: 2.5rem; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.7); width: 100%; max-width: 850px; border: 1px solid var(--border); }
+        .container { background: var(--card); padding: 2.5rem; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.7); width: 100%; max-width: 750px; border: 1px solid var(--border); }
         .banner { text-align: center; margin-bottom: 30px; border: 2px solid var(--primary); padding: 20px; border-radius: 8px; background: rgba(0, 255, 65, 0.05); }
         h1 { margin: 0; font-size: 2rem; color: var(--primary); text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 10px rgba(0, 255, 65, 0.5); }
         h3 { border-bottom: 1px solid var(--border); padding-bottom: 10px; font-size: 1.1rem; color: var(--primary); display: flex; align-items: center; gap: 10px; }
         input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid var(--border); background: #0d1117; color: white; box-sizing: border-box; }
         button { background: var(--primary); color: black; font-weight: bold; cursor: pointer; border: none; transition: 0.3s; text-transform: uppercase; }
         button:hover { background: #00cc33; filter: brightness(1.2); box-shadow: 0 0 15px rgba(0, 255, 65, 0.4); }
-        .btn-sm-action { text-decoration: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; display: inline-block; background: transparent; }
+        .btn-sm-action { text-decoration: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary); transition: 0.3s; display: inline-block; }
         .btn-sm-action:hover { background: var(--primary); color: black; }
         .btn-csv { text-decoration: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--info); color: var(--info); transition: 0.3s; display: inline-block; margin-right: 5px; }
         .btn-csv:hover { background: var(--info); color: white; }
@@ -26,17 +23,14 @@
         .flash-success { background: rgba(0, 43, 54, 0.8); border: 1px solid var(--primary); color: var(--primary); }
         .flash-danger { background: rgba(45, 0, 0, 0.8); border: 1px solid var(--danger); color: var(--danger); }
         .logout-link { color: var(--danger); text-decoration: none; font-size: 0.9rem; float: right; cursor: pointer; font-weight: bold; }
+        .logout-link:hover { text-decoration: underline; }
         .log-container { background-color: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 15px; max-height: 200px; overflow-y: auto; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; color: var(--text); }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px;}
         th { text-align: left; border-bottom: 1px solid #333; padding: 10px; color: var(--primary); }
         td { padding: 10px; border-bottom: 1px solid #1a1a1a; vertical-align: middle; }
         .badge { background: #003311; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--primary); font-size: 0.75rem; }
         .neon-text { text-align: center; margin: 30px 0; color: #F5F5F5; font-weight: bold; text-shadow: 0 0 10px #00d4ff; letter-spacing: 2px; }
         #encryption-status { font-size: 0.8rem; color: #e1b12c; display: none; margin-top: 5px; }
-        
-        /* Styles additionnels pour le Visualiseur */
-        .modal-content { background-color: var(--card) !important; border: 1px solid var(--info) !important; color: var(--text) !important; }
-        .stats-card { background: rgba(88, 166, 255, 0.05); border: 1px solid var(--info); padding: 15px; border-radius: 8px; margin-bottom: 25px; }
     </style>
 </head>
 <body>
@@ -55,15 +49,9 @@
         {% if current_user.is_authenticated %}
             <div class="user-panel">
                 <a href="javascript:void(0);" onclick="confirmLogout()" class="logout-link">
-                    <i class="fas fa-sign-out-alt"></i> Quitter
+                    <i class="fas fa-sign-out-alt"></i> Quitter le Terminal
                 </a>
                 <p>Opérateur: <span style="color:var(--primary); font-weight: bold;">{{ current_user.username }}</span></p>
-
-                <div class="stats-card text-center">
-                    <h6 class="text-info text-uppercase small mb-1">Intégrité du Bastion</h6>
-                    <h2 class="display-6 font-monospace m-0" style="color: var(--info);">{{ log_count }}</h2>
-                    <span class="text-secondary small">Événements enregistrés par le Dr Enoch Numbi</span>
-                </div>
                 
                 <section style="margin-top: 30px;">
                     <h3><i class="fas fa-lock"></i> Chiffrement Client-Side AES-GCM</h3>
@@ -79,7 +67,9 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
                         <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud</h3>
                         <div>
-                            <a href="{{ url_for('export_logs') }}" class="btn-csv"><i class="fas fa-file-csv"></i></a>
+                            <a href="{{ url_for('export_logs') }}" class="btn-csv">
+                                <i class="fas fa-file-csv me-1"></i> Exporter CSV
+                            </a>
                             <a href="{{ url_for('admin_logs') }}" class="btn-sm-action">Panel Admin</a>
                         </div>
                     </div>
@@ -88,14 +78,9 @@
                         <tbody>
                             {% for file in files %}
                             <tr>
-                                <td style="color: #aaa; font-size: 0.75rem;">
-                                    <i class="fas fa-file-shield text-warning me-2"></i>{{ file.public_id }}
-                                </td>
+                                <td style="color: #aaa; font-size: 0.75rem;">{{ file.public_id }}</td>
                                 <td>{{ file.size }}</td>
                                 <td style="text-align: right;">
-                                    <button onclick="openVisualizer('{{ file.public_id }}')" class="btn-sm-action me-1">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
                                     <a href="{{ url_for('download_cloud', public_id=file.public_id) }}" class="btn-sm-action"><i class="fas fa-file-download"></i></a>
                                 </td>
                             </tr>
@@ -129,88 +114,30 @@
                     <input type="password" name="password" placeholder="Mot de passe" required>
                     <button type="submit">Accéder au Terminal</button>
                 </form>
-                <div class="neon-text">[ INITIALISATION ]</div>
+                <div class="neon-text">[ INITIALISATION NOUVEAU COMPTE ]</div>
                 <form action="{{ url_for('register') }}" method="post">
                     <input type="text" name="username" placeholder="Pseudo" required>
                     <input type="password" name="password" placeholder="Mot de passe" required>
                     <input type="password" name="pin" placeholder="PIN 2FA" maxlength="6" required>
-                    <button type="submit" style="background:#21262d; color:var(--primary); border: 1px solid var(--primary);">Générer Accès</button>
+                    <button type="submit" style="background:#21262d; color:var(--primary); border: 1px solid var(--primary);">Générer Accès Sécurisé</button>
                 </form>
             </div>
         {% endif %}
+
+        <section style="margin-top: 50px; padding-top: 20px; border-top: 1px dashed var(--border); color: #8b949e; font-size: 0.85rem;">
+            <h3 style="font-size: 0.9rem; border:none;"><i class="fas fa-info-circle"></i> À PROPOS DE DORKNET CRYPTOVAULT</h3>
+            <p>Dirigé par le <strong>Dr Enoch Numbi</strong>, ce système déploie une architecture <em>Zero-Knowledge</em> utilisant le chiffrement <strong>AES-256-EAX</strong>.</p>
+        </section>
     </div>
 
-    <div class="modal fade" id="visualizerModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header" style="border-bottom: 1px solid var(--info);">
-                    <h5 class="modal-title" style="color: var(--info);"><i class="fas fa-unlock me-2"></i>Visualiseur ZK-RAM</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body text-center">
-                    <div id="keyInputArea">
-                        <p class="small text-secondary mb-3">Saisissez votre clé pour déchiffrer l'image en RAM.</p>
-                        <input type="password" id="aesKey" placeholder="Clé AES secrète" style="border-color: var(--info); color: var(--info);">
-                        <button onclick="processDecryption()" style="background: var(--info); color: white;">Déchiffrer</button>
-                    </div>
-                    <div id="imageDisplayArea" class="d-none">
-                        <img id="decryptedImage" src="" class="img-fluid rounded border border-secondary shadow">
-                        <p class="text-warning small mt-3"><i class="fas fa-biohazard"></i> Donnée volatile : Ne sera pas stockée sur le disque.</p>
-                    </div>
-                    <div id="loader" class="d-none py-4"><i class="fas fa-sync fa-spin fa-2x text-info"></i></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // LOGIQUE DE CONFIRMATION DE DÉCONNEXION
         function confirmLogout() {
-            if (confirm("⚠️ Alerte : Fermer la session DorkNet ?")) {
+            if (confirm("⚠️ Alerte de sécurité : Voulez-vous vraiment fermer la session DorkNet CryptoVault ?")) {
                 window.location.href = "{{ url_for('logout') }}";
             }
         }
 
-        // --- LOGIQUE VISUALISEUR ---
-        let currentFile = "";
-        function openVisualizer(publicId) {
-            currentFile = publicId;
-            document.getElementById('keyInputArea').classList.remove('d-none');
-            document.getElementById('imageDisplayArea').classList.add('d-none');
-            document.getElementById('aesKey').value = "";
-            new bootstrap.Modal(document.getElementById('visualizerModal')).show();
-        }
-
-        async function processDecryption() {
-            const key = document.getElementById('aesKey').value;
-            if (!key) return alert("Clé requise !");
-
-            const loader = document.getElementById('loader');
-            loader.classList.remove('d-none');
-            document.getElementById('keyInputArea').classList.add('d-none');
-
-            try {
-                const response = await fetch(`/get_raw_file/${currentFile}`);
-                const encryptedData = await response.text();
-                
-                // Déchiffrement AES
-                const decrypted = CryptoJS.AES.decrypt(encryptedData, key).toString(CryptoJS.enc.Utf8);
-                
-                if (!decrypted || !decrypted.startsWith('data:image')) {
-                    throw new Error("Clé incorrecte ou format non supporté.");
-                }
-
-                document.getElementById('decryptedImage').src = decrypted;
-                document.getElementById('imageDisplayArea').classList.remove('d-none');
-            } catch (e) {
-                alert("Erreur critique : " + e.message);
-                document.getElementById('keyInputArea').classList.remove('d-none');
-            } finally {
-                loader.classList.add('d-none');
-            }
-        }
-
-        // --- LOGIQUE UPLOAD (PBKDF2 + AES-GCM) ---
         async function encryptFileBeforeUpload(file, userKey) {
             const enc = new TextEncoder();
             const keyMaterial = await window.crypto.subtle.importKey("raw", enc.encode(userKey), {name: "PBKDF2"}, false, ["deriveKey"]);
@@ -218,17 +145,7 @@
             const iv = window.crypto.getRandomValues(new Uint8Array(12));
             const data = await file.arrayBuffer();
             const encryptedContent = await window.crypto.subtle.encrypt({name: "AES-GCM", iv: iv}, key, data);
-            
-            // Pour le visualiseur, on convertit souvent en Base64 avant upload si on veut utiliser CryptoJS côté client
-            // Ici, pour rester simple avec CryptoJS au déchiffrement, on pourrait envoyer le base64 chiffré
-            const reader = new FileReader();
-            return new Promise((resolve) => {
-                reader.onload = async () => {
-                    const encrypted = CryptoJS.AES.encrypt(reader.result, userKey).toString();
-                    resolve(new Blob([encrypted], {type: "text/plain"}));
-                };
-                reader.readAsDataURL(file);
-            });
+            return new Blob([iv, new Uint8Array(encryptedContent)], {type: "application/octet-stream"});
         }
 
         const form = document.getElementById('secure-upload-form');
@@ -245,10 +162,123 @@
                     formData.append('file', blob, fInput.files[0].name + '.enc');
                     const response = await fetch('/upload', { method: 'POST', body: formData });
                     if (response.ok) { window.location.reload(); }
-                    else { alert("Échec de l'upload"); status.style.display = 'none'; }
+                    else { alert("Erreur upload"); status.style.display = 'none'; }
                 }
             });
         }
     </script>
 </body>
 </html>
+
+
+À celui-ci 
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card bg-dark border-info">
+            <div class="card-body text-center">
+                <h6 class="text-info text-uppercase small">Intégrité du Bastion</h6>
+                <h2 class="display-6 font-monospace">{{ log_count }}</h2>
+                <span class="text-secondary small">Événements enregistrés</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card bg-dark border-secondary">
+    <table class="table table-dark table-hover">
+        <thead>
+            <tr>
+                <th>Fichier (Archive .enc)</th>
+                <th>Taille</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for file in files %}
+            <tr>
+                <td><i class="fas fa-file-shield text-warning me-2"></i>{{ file.public_id }}</td>
+                <td>{{ file.size }}</td>
+                <td>
+                    <button onclick="openVisualizer('{{ file.public_id }}')" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-eye"></i> Visualiser
+                    </button>
+                    <a href="{{ url_for('download_cloud', public_id=file.public_id) }}" class="btn btn-sm btn-outline-light">
+                        <i class="fas fa-download"></i>
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="modal fade" id="visualizerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content bg-dark text-light border-info">
+            <div class="modal-header border-info">
+                <h5 class="modal-title font-monospace"><i class="fas fa-unlock me-2"></i>Déchiffrement AES-GCM</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <div id="keyInputArea">
+                    <p class="small text-secondary">Saisissez votre clé de session pour déchiffrer l'image en mémoire vive.</p>
+                    <input type="password" id="aesKey" class="form-control bg-black text-info border-info mb-3" placeholder="Clé AES du Dr Numbi">
+                    <button onclick="processDecryption()" class="btn btn-info w-100">Déchiffrer et Afficher</button>
+                </div>
+                <div id="imageDisplayArea" class="d-none">
+                    <img id="decryptedImage" src="" class="img-fluid rounded shadow-lg border border-secondary">
+                    <hr class="border-secondary">
+                    <p class="text-warning small"><i class="fas fa-info-circle"></i> Cette image n'existe qu'en RAM. Elle sera détruite à la fermeture de la fenêtre.</p>
+                </div>
+                <div id="loader" class="d-none py-4">
+                    <div class="spinner-border text-info" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentFile = "";
+
+function openVisualizer(publicId) {
+    currentFile = publicId;
+    document.getElementById('keyInputArea').classList.remove('d-none');
+    document.getElementById('imageDisplayArea').classList.add('d-none');
+    document.getElementById('aesKey').value = "";
+    new bootstrap.Modal(document.getElementById('visualizerModal')).show();
+}
+
+async function processDecryption() {
+    const key = document.getElementById('aesKey').value;
+    if (!key) return alert("Clé manquante !");
+
+    const loader = document.getElementById('loader');
+    loader.classList.remove('d-none');
+    document.getElementById('keyInputArea').classList.add('d-none');
+
+    try {
+        // 1. Récupérer le fichier brut du serveur
+        const response = await fetch(`/get_raw_file/${currentFile}`);
+        const encryptedData = await response.text();
+
+        // 2. Déchiffrement AES (Ajustez selon votre méthode de chiffrement client)
+        const decrypted = CryptoJS.AES.decrypt(encryptedData, key).toString(CryptoJS.enc.Utf8);
+        
+        if (!decrypted) throw new Error("Échec du déchiffrement (Clé incorrecte ?)");
+
+        // 3. Affichage (Si c'est un base64 ou une URL de donnée)
+        document.getElementById('decryptedImage').src = decrypted;
+        document.getElementById('imageDisplayArea').classList.remove('d-none');
+    } catch (e) {
+        alert("Erreur : " + e.message);
+        document.getElementById('keyInputArea').classList.remove('d-none');
+    } finally {
+        loader.classList.add('d-none');
+    }
+}
+</script>
