@@ -13,14 +13,20 @@
         .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; }
         .table { color: #c9d1d9; border-color: #30363d; }
         .table thead { background-color: #21262d; }
-        /* Style Néon spécifique à DorkNet */
+        
+        /* Styles Statuts */
         .status-breach { color: #f85149; font-weight: bold; background: rgba(248, 81, 73, 0.1); padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(248, 81, 73, 0.3); }
         .status-success { color: #3fb950; font-weight: bold; }
         .status-upload { color: #58a6ff; font-weight: bold; }
-        .btn-purge { background-color: transparent; border: 1px solid #f85149; color: #f85149; transition: 0.3s; }
-        .btn-purge:hover { background-color: #f85149; color: white; }
+        .status-system { color: #d29922; font-weight: bold; }
+        
+        /* Boutons Spéciaux */
+        .btn-purge { background-color: transparent; border: 1px solid #d29922; color: #d29922; transition: 0.3s; font-weight: 500; }
+        .btn-purge:hover { background-color: #d29922; color: #000; box-shadow: 0 0 10px rgba(210, 153, 34, 0.3); }
+        
         .btn-kill { background-color: #f85149; color: white; font-weight: bold; border: none; transition: 0.3s; }
         .btn-kill:hover { background-color: #b93a34; box-shadow: 0 0 15px rgba(248, 81, 73, 0.4); }
+        
         .log-timestamp { font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; color: #8b949e; }
         .badge-admin { background-color: #00ff41; color: #000; font-size: 0.7rem; vertical-align: middle; }
     </style>
@@ -41,20 +47,20 @@
     <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
         <h2><i class="fas fa-terminal me-2 text-warning"></i>Journal d'Audit Intégral</h2>
         
-        <div class="d-flex gap-2 align-items-center">
-            <form action="{{ url_for('trigger_kill_switch') }}" method="POST" onsubmit="return confirm('❗ ATTENTION : Vous allez verrouiller l\'intégralité du bastion. Confirmer le protocole SILENCE RADIO ?');">
-                <button type="submit" class="btn btn-sm btn-kill">
-                    <i class="fas fa-skull-crossbones me-1"></i> ACTIVER KILL SWITCH
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+            <form action="{{ url_for('manual_purge') }}" method="POST" onsubmit="return confirm('⚠️ ACTION CRITIQUE : Supprimer définitivement les logs de plus de 30 jours ?');">
+                <button type="submit" class="btn btn-sm btn-purge">
+                    <i class="fas fa-broom me-1"></i> NETTOYER LE BASTION
                 </button>
             </form>
 
-            <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline-info">
-                <i class="fas fa-envelope me-1"></i> Dashboard
+            <a href="{{ url_for('export_logs') }}" class="btn btn-sm btn-outline-info">
+                <i class="fas fa-file-export me-1"></i> Exporter CSV
             </a>
 
-            <form action="{{ url_for('index') }}" method="POST" onsubmit="return confirm('⚠️ Purger les logs ? (Action irréversible)');">
-                <button type="submit" class="btn btn-sm btn-purge">
-                    <i class="fas fa-trash-alt me-1"></i> Purger
+            <form action="{{ url_for('trigger_kill_switch') }}" method="POST" onsubmit="return confirm('❗ ATTENTION : Vous allez verrouiller l\'intégralité du bastion. Confirmer le protocole SILENCE RADIO ?');">
+                <button type="submit" class="btn btn-sm btn-kill">
+                    <i class="fas fa-skull-crossbones me-1"></i> KILL SWITCH
                 </button>
             </form>
         </div>
@@ -87,18 +93,21 @@
                     {% for log in logs %}
                     <tr>
                         <td class="log-timestamp">
-                            {% if log.timestamp.strftime %}
-                                {{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}
-                            {% else %}
-                                {{ log.timestamp }}
-                            {% endif %}
+                            {{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') if log.timestamp.strftime else log.timestamp }}
                         </td>
-                        <td><span class="text-info">@{{ log.username }}</span></td>
                         <td>
-                            {% if 'BREACH' in log.action or 'LOCKDOWN' in log.action or 'HONEYTOKEN' in log.action %}
+                            <span class="{% if log.username == 'SYSTEM_AUTO' %}text-warning{% else %}text-info{% endif %}">
+                                <i class="fas {% if log.username == 'SYSTEM_AUTO' %}fa-robot{% else %}fa-user-secret{% endif %} me-1"></i>
+                                @{{ log.username }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if 'BREACH' in log.action or 'LOCKDOWN' in log.action or 'HONEYTOKEN' in log.action or 'KILL' in log.action %}
                                 <span class="status-breach"><i class="fas fa-exclamation-triangle me-1"></i>{{ log.action }}</span>
-                            {% elif log.action == 'UPLOAD' %}
-                                <span class="status-upload"><i class="fas fa-cloud-upload-alt me-1"></i>UPLOAD</span>
+                            {% elif 'UPLOAD' in log.action %}
+                                <span class="status-upload"><i class="fas fa-cloud-upload-alt me-1"></i>{{ log.action }}</span>
+                            {% elif 'PURGE' in log.action or 'SYSTEM' in log.action %}
+                                <span class="status-system"><i class="fas fa-recycle me-1"></i>{{ log.action }}</span>
                             {% elif 'SUCCESS' in log.action %}
                                 <span class="status-success"><i class="fas fa-check-circle me-1"></i>{{ log.action }}</span>
                             {% else %}
@@ -111,7 +120,10 @@
                     
                     {% if not logs %}
                     <tr>
-                        <td colspan="4" class="text-center py-5 text-secondary italic">Aucune entrée d'audit détectée dans la base de données.</td>
+                        <td colspan="4" class="text-center py-5 text-secondary">
+                            <i class="fas fa-ghost fa-3x mb-3 d-block opacity-25"></i>
+                            Aucune entrée d'audit détectée dans la base de données.
+                        </td>
                     </tr>
                     {% endif %}
                 </tbody>
