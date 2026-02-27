@@ -5,7 +5,7 @@ import requests
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash, session, abort
@@ -23,7 +23,25 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# --- CONFIGURATION ANTI-BRUTE FORCE ---
+# --- CONFIGURATION DU SCHEDULER & SÉCURITÉ ---
+class Config:
+    SCHEDULER_API_ENABLED = True
+    SECRET_KEY = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024 
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Base de données
+    db_url = os.getenv('DATABASE_URL', 'sqlite:///cryptovault.db')
+    if db_url and db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    SQLALCHEMY_DATABASE_URI = db_url
+
+app.config.from_object(Config())
+
+# --- INITIALISATION DES SERVICES ---
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'index'
+
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -31,19 +49,19 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-# --- CONFIGURATION GÉNÉRALE & BASE DE DONNÉES ---
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
+mail = Mail(app)
+app.config.update(
+    MAIL_SERVER='smtp.gmail.com',
+    MAIL_PORT=587,
+    MAIL_USE_TLS=True,
+    MAIL_USERNAME=os.getenv('MAIL_USER'),
+    MAIL_PASSWORD=os.getenv('MAIL_PASS'),
+    MAIL_DEFAULT_SENDER=os.getenv('MAIL_USER')
+)
 
-db_url = os.getenv('DATABASE_URL', 'sqlite:///cryptovault.db')
-if db_url and db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-db = SQLAlchemy(app)
-login_manager = LoginManager(app)
-login_manager.login_view = 'index'
+scheduler = APScheduler()
+scheduler.init_app(app)
+scheduler.start()
 
 # --- ÉTAT DU SYSTÈME (KILL SWITCH) ---
 SYSTEM_ACTIVE = True 
@@ -54,19 +72,6 @@ cloudinary.config(
   api_key = os.environ.get('CLOUDINARY_API_KEY', '').strip(),
   api_secret = os.environ.get('CLOUDINARY_API_SECRET', '').strip()
 )
-
-# --- CONFIGURATION EMAIL & SCHEDULER ---
-app.config.update(
-    MAIL_SERVER='smtp.gmail.com',
-    MAIL_PORT=587,
-    MAIL_USE_TLS=True,
-    MAIL_USERNAME=os.getenv('MAIL_USER'),
-    MAIL_PASSWORD=os.getenv('MAIL_PASS'),
-    MAIL_DEFAULT_SENDER=os.getenv('MAIL_USER')
-)
-
-mail = Mail(app)
-scheduler = APScheduler()
 
 # --- MODÈLES DE DONNÉES ---
 class User(UserMixin, db.Model):
@@ -86,7 +91,7 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- DÉCORATEURS ET MIDDLEWARES ---
+# --- DÉCORATEURS & MIDDLEWARES ---
 
 def admin_required(f):
     @wraps(f)
@@ -121,6 +126,29 @@ def send_critical_alert(action, details):
             msg.html = f"<b>Action:</b> {action}<br><b>Détails:</b> {details}"
             mail.send(msg)
         except Exception as e: print(f"❌ Erreur mail : {e}")
+
+# --- TÂCHES PLANIFIÉES (SCHEDULER) ---
+
+@scheduler.task('cron', id='purge_logs', hour=0, minute=0)
+def auto_purge_audit_logs():
+    """Supprime les logs vieux de plus de 30 jours chaque nuit à minuit."""
+    with app.app_context():
+        limit_date = datetime.now() - timedelta(days=30)
+        try:
+            deleted_count = AuditLog.query.filter(AuditLog.timestamp < limit_date).delete()
+            db.session.commit()
+            
+            new_log = AuditLog(
+                username="SYSTEM_AUTO",
+                action="LOG_PURGE",
+                details=f"Nettoyage automatique effectué : {deleted_count} entrées supprimées."
+            )
+            db.session.add(new_log)
+            db.session.commit()
+            print(f"✅ [DORKNET] Purge réussie : {deleted_count} logs supprimés.")
+        except Exception as e:
+            db.session.rollback()
+            print(f"❌ [DORKNET] Erreur lors de la purge : {e}")
 
 # --- ROUTES AUTHENTIFICATION ---
 
@@ -183,7 +211,6 @@ def upload():
     if file:
         try:
             file_content = file.read()
-            # Force resource_type="raw" pour les fichiers chiffrés .enc
             upload_result = cloudinary.uploader.upload(
                 file_content,
                 resource_type="raw",
@@ -191,15 +218,9 @@ def upload():
                 folder="DorkNet_Vault",
                 invalidate=True
             )
-            
-            db.session.add(AuditLog(
-                username=current_user.username, 
-                action="UPLOAD_SUCCESS", 
-                details=f"Fichier {file.filename} envoyé avec succès."
-            ))
+            db.session.add(AuditLog(username=current_user.username, action="UPLOAD_SUCCESS", details=f"Fichier {file.filename} envoyé."))
             db.session.commit()
             flash('Bastion mis à jour : Fichier envoyé avec succès !', "success")
-            
         except Exception as e:
             flash(f"Erreur technique : {str(e)}", "danger")
     return redirect(url_for('index'))
@@ -207,7 +228,6 @@ def upload():
 @app.route('/download_cloud/<path:public_id>')
 @login_required
 def download_cloud(public_id):
-    # Sécurité Honeytoken
     if "passwords_importants" in public_id.lower():
         error_msg = f"⚠️ INTRUSION par @{current_user.username}."
         db.session.add(AuditLog(username=current_user.username, action="HONEYTOKEN_TRIGGER", details=error_msg))
@@ -217,7 +237,6 @@ def download_cloud(public_id):
         return redirect(url_for('index'))
 
     try:
-        # Récupération en mode 'raw' (indispensable pour les .enc)
         res = cloudinary.api.resource(public_id, resource_type="raw")
         response = requests.get(res['secure_url'])
         return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
@@ -234,6 +253,19 @@ def admin_logs():
     all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
     return render_template('admin_logs.html', logs=all_logs)
 
+@app.route('/admin/purge_now', methods=['POST'])
+@login_required
+@admin_required
+def manual_purge():
+    """Purge manuelle déclenchée par l'admin."""
+    limit_date = datetime.now() - timedelta(days=30)
+    deleted_count = AuditLog.query.filter(AuditLog.timestamp < limit_date).delete()
+    db.session.commit()
+    db.session.add(AuditLog(username=current_user.username, action="MANUAL_PURGE", details=f"Purge effectuée ({deleted_count} logs)."))
+    db.session.commit()
+    flash(f"Nettoyage terminé : {deleted_count} logs supprimés.", "info")
+    return redirect(url_for('admin_logs'))
+
 @app.route('/admin/export_logs')
 @login_required
 @admin_required
@@ -245,12 +277,7 @@ def export_logs():
     for log in all_logs:
         writer.writerow([log.id, log.timestamp, log.username, log.action, log.details])
     output.seek(0)
-    return send_file(
-        io.BytesIO(output.getvalue().encode('utf-8')),
-        mimetype='text/csv',
-        as_attachment=True,
-        download_name=f"DorkNet_Audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    )
+    return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name=f"Audit_{datetime.now().strftime('%Y%m%d')}.csv")
 
 @app.route('/admin/killswitch', methods=['POST'])
 @login_required
@@ -258,7 +285,7 @@ def export_logs():
 def trigger_kill_switch():
     global SYSTEM_ACTIVE
     SYSTEM_ACTIVE = False
-    send_critical_alert("KILL_SWITCH_ACTIVATED", "Confinement manuel activé par l'administrateur.")
+    send_critical_alert("KILL_SWITCH_ACTIVATED", "Confinement manuel activé.")
     db.session.add(AuditLog(username=current_user.username, action="SYS_LOCKDOWN", details="Mode Silence Radio."))
     db.session.commit()
     flash("🚨 BASTION VERROUILLÉ.", "danger")
@@ -271,15 +298,9 @@ def index():
     cloud_files = []
     if current_user.is_authenticated:
         try:
-            # Récupération des ressources brutes (.enc)
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
-                cloud_files = [
-                    {
-                        'public_id': r['public_id'], 
-                        'size': f"{r['bytes']/1024:.1f} KB"
-                    } for r in res['resources']
-                ]
+                cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res['resources']]
         except Exception as e:
             print(f"Erreur d'affichage : {e}")
             
@@ -289,6 +310,5 @@ def index():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    # Configuration du port pour Render (10000) ou local (5000)
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
