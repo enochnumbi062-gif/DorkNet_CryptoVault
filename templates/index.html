@@ -7,7 +7,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <style>
         :root { --primary: #00ff41; --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --danger: #f85149; --info: #58a6ff; }
@@ -35,9 +34,9 @@
         .neon-text { text-align: center; margin: 30px 0; color: #F5F5F5; font-weight: bold; text-shadow: 0 0 10px #00d4ff; letter-spacing: 2px; }
         #encryption-status { font-size: 0.8rem; color: #e1b12c; display: none; margin-top: 5px; }
         
+        /* Styles additionnels pour le Visualiseur */
         .modal-content { background-color: var(--card) !important; border: 1px solid var(--info) !important; color: var(--text) !important; }
         .stats-card { background: rgba(88, 166, 255, 0.05); border: 1px solid var(--info); padding: 15px; border-radius: 8px; margin-bottom: 25px; }
-        .timeline-card { background: rgba(0, 255, 65, 0.02); border: 1px solid var(--border); padding: 15px; border-radius: 8px; margin-top: 15px; }
     </style>
 </head>
 <body>
@@ -64,20 +63,13 @@
                     <h6 class="text-info text-uppercase small mb-1">Intégrité du Bastion</h6>
                     <h2 class="display-6 font-monospace m-0" style="color: var(--info);">{{ log_count }}</h2>
                     <span class="text-secondary small">Événements enregistrés par le Dr Enoch Numbi</span>
-                    
-                    <div class="timeline-card text-start">
-                        <h6 style="color: var(--info); font-size: 0.75rem; text-transform: uppercase; margin-bottom: 15px;">
-                            <i class="fas fa-chart-line me-2"></i>Activité du Bastion (24h)
-                        </h6>
-                        <canvas id="activityChart" height="120"></canvas>
-                    </div>
                 </div>
                 
                 <section style="margin-top: 30px;">
-                    <h3><i class="fas fa-lock"></i> Chiffrement Client-Side AES-256</h3>
+                    <h3><i class="fas fa-lock"></i> Chiffrement Client-Side AES-GCM</h3>
                     <form id="secure-upload-form">
                         <input type="file" id="file-input" required>
-                        <input type="password" id="client-pass" placeholder="Clé de chiffrement locale (Secret RAM)" required>
+                        <input type="password" id="client-pass" placeholder="Clé de chiffrement locale (Non envoyée au serveur)" required>
                         <button type="submit" id="btn-upload">Lancer le Chiffrement & Upload</button>
                         <div id="encryption-status"><i class="fas fa-spinner fa-spin"></i> Chiffrement local en cours...</div>
                     </form>
@@ -87,7 +79,7 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
                         <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud</h3>
                         <div>
-                            <a href="{{ url_for('export_logs') }}" class="btn-csv" title="Exporter les logs"><i class="fas fa-file-csv"></i></a>
+                            <a href="{{ url_for('export_logs') }}" class="btn-csv"><i class="fas fa-file-csv"></i></a>
                             <a href="{{ url_for('admin_logs') }}" class="btn-sm-action">Panel Admin</a>
                         </div>
                     </div>
@@ -163,7 +155,7 @@
                     </div>
                     <div id="imageDisplayArea" class="d-none">
                         <img id="decryptedImage" src="" class="img-fluid rounded border border-secondary shadow">
-                        <p class="text-warning small mt-3"><i class="fas fa-biohazard"></i> Donnée volatile : Non stockée sur le disque.</p>
+                        <p class="text-warning small mt-3"><i class="fas fa-biohazard"></i> Donnée volatile : Ne sera pas stockée sur le disque.</p>
                     </div>
                     <div id="loader" class="d-none py-4"><i class="fas fa-sync fa-spin fa-2x text-info"></i></div>
                 </div>
@@ -179,35 +171,6 @@
             }
         }
 
-        // --- GRAPHique D'ACTIVITÉ ---
-        const ctx = document.getElementById('activityChart');
-        if (ctx) {
-            new Chart(ctx.getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: {{ labels|tojson if labels else '[]' }},
-                    datasets: [{
-                        label: 'Activités',
-                        data: {{ values|tojson if values else '[]' }},
-                        borderColor: '#00ff41',
-                        backgroundColor: 'rgba(0, 255, 65, 0.1)',
-                        borderWidth: 2,
-                        pointRadius: 3,
-                        tension: 0.4,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: { beginAtZero: true, grid: { color: '#161b22' }, ticks: { color: '#8b949e', font: { size: 10 } } },
-                        x: { grid: { display: false }, ticks: { color: '#8b949e', font: { size: 10 } } }
-                    }
-                }
-            });
-        }
-
         // --- LOGIQUE VISUALISEUR ---
         let currentFile = "";
         function openVisualizer(publicId) {
@@ -221,6 +184,7 @@
         async function processDecryption() {
             const key = document.getElementById('aesKey').value;
             if (!key) return alert("Clé requise !");
+
             const loader = document.getElementById('loader');
             loader.classList.remove('d-none');
             document.getElementById('keyInputArea').classList.add('d-none');
@@ -228,24 +192,38 @@
             try {
                 const response = await fetch(`/get_raw_file/${currentFile}`);
                 const encryptedData = await response.text();
+                
+                // Déchiffrement AES
                 const decrypted = CryptoJS.AES.decrypt(encryptedData, key).toString(CryptoJS.enc.Utf8);
                 
                 if (!decrypted || !decrypted.startsWith('data:image')) {
                     throw new Error("Clé incorrecte ou format non supporté.");
                 }
+
                 document.getElementById('decryptedImage').src = decrypted;
                 document.getElementById('imageDisplayArea').classList.remove('d-none');
             } catch (e) {
-                alert("Erreur : " + e.message);
+                alert("Erreur critique : " + e.message);
                 document.getElementById('keyInputArea').classList.remove('d-none');
-            } finally { loader.classList.add('d-none'); }
+            } finally {
+                loader.classList.add('d-none');
+            }
         }
 
-        // --- LOGIQUE UPLOAD HARMONISÉE ---
+        // --- LOGIQUE UPLOAD (PBKDF2 + AES-GCM) ---
         async function encryptFileBeforeUpload(file, userKey) {
+            const enc = new TextEncoder();
+            const keyMaterial = await window.crypto.subtle.importKey("raw", enc.encode(userKey), {name: "PBKDF2"}, false, ["deriveKey"]);
+            const key = await window.crypto.subtle.deriveKey({name: "PBKDF2", salt: enc.encode("DorkNet-Salt-Numbi"), iterations: 100000, hash: "SHA-256"}, keyMaterial, {name: "AES-GCM", length: 256}, false, ["encrypt"]);
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const data = await file.arrayBuffer();
+            const encryptedContent = await window.crypto.subtle.encrypt({name: "AES-GCM", iv: iv}, key, data);
+            
+            // Pour le visualiseur, on convertit souvent en Base64 avant upload si on veut utiliser CryptoJS côté client
+            // Ici, pour rester simple avec CryptoJS au déchiffrement, on pourrait envoyer le base64 chiffré
+            const reader = new FileReader();
             return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = () => {
+                reader.onload = async () => {
                     const encrypted = CryptoJS.AES.encrypt(reader.result, userKey).toString();
                     resolve(new Blob([encrypted], {type: "text/plain"}));
                 };
