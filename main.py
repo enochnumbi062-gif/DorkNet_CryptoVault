@@ -10,6 +10,7 @@ from functools import wraps
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash, session, abort
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import func  # Importation essentielle pour le graphique
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_mail import Mail, Message
 from flask_apscheduler import APScheduler
@@ -254,17 +255,6 @@ def admin_logs():
     all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
     return render_template('admin_logs.html', logs=all_logs)
 
-@app.route('/admin/purge_now', methods=['POST'])
-@login_required
-@admin_required
-def manual_purge():
-    limit_date = datetime.now() - timedelta(days=30)
-    deleted_count = AuditLog.query.filter(AuditLog.timestamp < limit_date).delete()
-    db.session.add(AuditLog(username=current_user.username, action="MANUAL_PURGE", details=f"Purge effectuée ({deleted_count} logs)."))
-    db.session.commit()
-    flash(f"Nettoyage terminé : {deleted_count} logs supprimés.", "info")
-    return redirect(url_for('admin_logs'))
-
 @app.route('/admin/export_logs')
 @login_required
 @admin_required
@@ -278,35 +268,45 @@ def export_logs():
     output.seek(0)
     return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name=f"Audit_{datetime.now().strftime('%Y%m%d')}.csv")
 
-@app.route('/admin/killswitch', methods=['POST'])
-@login_required
-@admin_required
-def trigger_kill_switch():
-    global SYSTEM_ACTIVE
-    SYSTEM_ACTIVE = False
-    send_critical_alert("KILL_SWITCH_ACTIVATED", "Confinement manuel activé.")
-    db.session.add(AuditLog(username=current_user.username, action="SYS_LOCKDOWN", details="Mode Silence Radio."))
-    db.session.commit()
-    flash("🚨 BASTION VERROUILLÉ.", "danger")
-    return redirect(url_for('admin_logs'))
-
-# --- ROUTE PRINCIPALE ---
+# --- ROUTE PRINCIPALE MISE À JOUR ---
 
 @app.route('/')
 def index():
     cloud_files = []
     log_count = 0
+    hourly_labels = [f"{i:02d}h" for i in range(24)]
+    hourly_values = [0] * 24
+
     if current_user.is_authenticated:
+        # Compteur total
         log_count = AuditLog.query.count()
+        
+        # Extraction des statistiques d'activité par heure (dernières 24h)
+        stats_raw = db.session.query(
+            func.strftime('%H', AuditLog.timestamp), 
+            func.count(AuditLog.id)
+        ).filter(AuditLog.timestamp >= datetime.now() - timedelta(hours=24)
+        ).group_by(func.strftime('%H', AuditLog.timestamp)).all()
+        
+        stats_dict = {row[0]: row[1] for row in stats_raw}
+        hourly_values = [stats_dict.get(f"{i:02d}", 0) for i in range(24)]
+
+        # Récupération fichiers Cloudinary
         try:
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
                 cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res['resources']]
         except Exception as e:
-            print(f"Erreur d'affichage : {e}")
+            print(f"Erreur d'affichage Cloudinary : {e}")
             
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
-    return render_template('index.html', files=cloud_files, logs=logs, log_count=log_count)
+    
+    return render_template('index.html', 
+                           files=cloud_files, 
+                           logs=logs, 
+                           log_count=log_count,
+                           labels=hourly_labels,
+                           values=hourly_values)
 
 if __name__ == '__main__':
     with app.app_context():
