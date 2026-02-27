@@ -16,7 +16,6 @@ from flask_apscheduler import APScheduler
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
-from Crypto.Random import get_random_bytes
 
 # --- CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ---
 load_dotenv()
@@ -66,7 +65,7 @@ scheduler.start()
 # --- ÉTAT DU SYSTÈME (KILL SWITCH) ---
 SYSTEM_ACTIVE = True 
 
-# --- CONFIGURATION CLOUDINARY (CORRECTIF DR NUMBI) ---
+# --- CONFIGURATION CLOUDINARY ---
 cloudinary.config(
   cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME', '').strip(),
   api_key = os.environ.get('CLOUDINARY_API_KEY', '').strip(),
@@ -131,24 +130,16 @@ def send_critical_alert(action, details):
 
 @scheduler.task('cron', id='purge_logs', hour=0, minute=0)
 def auto_purge_audit_logs():
-    """Supprime les logs vieux de plus de 30 jours chaque nuit à minuit."""
     with app.app_context():
         limit_date = datetime.now() - timedelta(days=30)
         try:
             deleted_count = AuditLog.query.filter(AuditLog.timestamp < limit_date).delete()
             db.session.commit()
-            
-            new_log = AuditLog(
-                username="SYSTEM_AUTO",
-                action="LOG_PURGE",
-                details=f"Nettoyage automatique effectué : {deleted_count} entrées supprimées."
-            )
-            db.session.add(new_log)
+            db.session.add(AuditLog(username="SYSTEM_AUTO", action="LOG_PURGE", details=f"Nettoyage auto : {deleted_count} logs supprimés."))
             db.session.commit()
-            print(f"✅ [DORKNET] Purge réussie : {deleted_count} logs supprimés.")
         except Exception as e:
             db.session.rollback()
-            print(f"❌ [DORKNET] Erreur lors de la purge : {e}")
+            print(f"❌ Erreur purge : {e}")
 
 # --- ROUTES AUTHENTIFICATION ---
 
@@ -179,8 +170,7 @@ def login():
 @app.route('/verify_2fa', methods=['GET', 'POST'])
 @limiter.limit("5 per 15 minutes")
 def verify_2fa():
-    if 'pending_user_id' not in session:
-        return redirect(url_for('index'))
+    if 'pending_user_id' not in session: return redirect(url_for('index'))
     if request.method == 'POST':
         pin = request.form.get('pin')
         user = User.query.get(session['pending_user_id'])
@@ -220,7 +210,7 @@ def upload():
             )
             db.session.add(AuditLog(username=current_user.username, action="UPLOAD_SUCCESS", details=f"Fichier {file.filename} envoyé."))
             db.session.commit()
-            flash('Bastion mis à jour : Fichier envoyé avec succès !', "success")
+            flash('Fichier envoyé avec succès !', "success")
         except Exception as e:
             flash(f"Erreur technique : {str(e)}", "danger")
     return redirect(url_for('index'))
@@ -244,6 +234,17 @@ def download_cloud(public_id):
         flash(f"🚫 Échec de récupération : {str(e)}", "danger")
         return redirect(url_for('index'))
 
+@app.route('/get_raw_file/<path:public_id>')
+@login_required
+def get_raw_file(public_id):
+    """Récupère le contenu brut (chiffré) pour le déchiffrement client JS."""
+    try:
+        res = cloudinary.api.resource(public_id, resource_type="raw")
+        response = requests.get(res['secure_url'])
+        return response.content
+    except Exception as e:
+        return str(e), 400
+
 # --- ROUTES ADMIN ---
 
 @app.route('/admin/logs')
@@ -257,10 +258,8 @@ def admin_logs():
 @login_required
 @admin_required
 def manual_purge():
-    """Purge manuelle déclenchée par l'admin."""
     limit_date = datetime.now() - timedelta(days=30)
     deleted_count = AuditLog.query.filter(AuditLog.timestamp < limit_date).delete()
-    db.session.commit()
     db.session.add(AuditLog(username=current_user.username, action="MANUAL_PURGE", details=f"Purge effectuée ({deleted_count} logs)."))
     db.session.commit()
     flash(f"Nettoyage terminé : {deleted_count} logs supprimés.", "info")
@@ -296,7 +295,9 @@ def trigger_kill_switch():
 @app.route('/')
 def index():
     cloud_files = []
+    log_count = 0
     if current_user.is_authenticated:
+        log_count = AuditLog.query.count()
         try:
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
@@ -305,7 +306,7 @@ def index():
             print(f"Erreur d'affichage : {e}")
             
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
-    return render_template('index.html', files=cloud_files, logs=logs)
+    return render_template('index.html', files=cloud_files, logs=logs, log_count=log_count)
 
 if __name__ == '__main__':
     with app.app_context():
