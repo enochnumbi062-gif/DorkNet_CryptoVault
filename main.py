@@ -86,6 +86,24 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+# --- ROUTE RÉPARATION CRITIQUE (BULLDOZER) ---
+
+@app.route('/bulldozer-repair')
+def bulldozer_repair():
+    try:
+        from sqlalchemy import text
+        # 1. On force la suppression de la table corrompue (impacte l'autre application)
+        db.session.execute(text('DROP TABLE IF EXISTS "user" CASCADE;'))
+        db.session.commit()
+        
+        # 2. On demande à SQLAlchemy de recréer TOUT à neuf
+        db.create_all()
+        
+        return "<h1>🚀 BULLDOZER RÉUSSI !</h1><p>La table 'user' a été reconstruite à neuf. Testez l'inscription sur DorkNet CryptoVault.</p>"
+    except Exception as e:
+        db.session.rollback()
+        return f"<h1>❌ ÉCHEC</h1><p>Erreur : {str(e)}</p>"
+
 # --- DÉCORATEURS ET MIDDLEWARES ---
 
 def admin_required(f):
@@ -98,29 +116,8 @@ def admin_required(f):
 
 @app.before_request
 def check_kill_switch():
-    if not SYSTEM_ACTIVE and request.endpoint not in ['index', 'static', 'login', 'logout', 'register']:
-        return "<h1>⚠️ ACCÈS NEUTRALISÉ</h1><p>Le bastion DorkNet CryptoVault est en mode confinement de sécurité par le Dr Enoch Numbi.</p>", 503
-
-@app.after_request
-def add_security_headers(response):
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    return response
-
-# --- ALERTES SÉCURITÉ ---
-
-def send_critical_alert(action, details):
-    with app.app_context():
-        try:
-            msg = Message(
-                subject=f"🚨 [DORKNET] ALERTE SÉCURITÉ : {action}",
-                recipients=[os.getenv('MAIL_USER')],
-                extra_headers={'X-Priority': '1'}
-            )
-            msg.html = f"<b>Action:</b> {action}<br><b>Détails:</b> {details}"
-            mail.send(msg)
-        except Exception as e: print(f"❌ Erreur mail : {e}")
+    if not SYSTEM_ACTIVE and request.endpoint not in ['index', 'static', 'login', 'logout', 'register', 'bulldozer_repair']:
+        return "<h1>⚠️ ACCÈS NEUTRALISÉ</h1><p>Le bastion DorkNet CryptoVault est en mode confinement.</p>", 503
 
 # --- ROUTES AUTHENTIFICATION ---
 
@@ -149,7 +146,6 @@ def login():
     return redirect(url_for('index'))
 
 @app.route('/verify_2fa', methods=['GET', 'POST'])
-@limiter.limit("5 per 15 minutes")
 def verify_2fa():
     if 'pending_user_id' not in session:
         return redirect(url_for('index'))
@@ -190,15 +186,9 @@ def upload():
                 folder="DorkNet_Vault",
                 invalidate=True
             )
-            
-            db.session.add(AuditLog(
-                username=current_user.username, 
-                action="UPLOAD_SUCCESS", 
-                details=f"Fichier {file.filename} envoyé avec succès."
-            ))
+            db.session.add(AuditLog(username=current_user.username, action="UPLOAD_SUCCESS", details=f"Fichier {file.filename} envoyé."))
             db.session.commit()
-            flash('Bastion mis à jour : Fichier envoyé avec succès !', "success")
-            
+            flash('Fichier envoyé avec succès !', "success")
         except Exception as e:
             flash(f"Erreur technique : {str(e)}", "danger")
     return redirect(url_for('index'))
@@ -206,60 +196,13 @@ def upload():
 @app.route('/download_cloud/<path:public_id>')
 @login_required
 def download_cloud(public_id):
-    if "passwords_importants" in public_id.lower():
-        error_msg = f"⚠️ INTRUSION par @{current_user.username}."
-        db.session.add(AuditLog(username=current_user.username, action="HONEYTOKEN_TRIGGER", details=error_msg))
-        db.session.commit()
-        send_critical_alert("HONEYTOKEN_TRIGGERED", error_msg)
-        flash("🚫 Erreur critique de sécurité.", "danger")
-        return redirect(url_for('index'))
-
     try:
         res = cloudinary.api.resource(public_id, resource_type="raw")
         response = requests.get(res['secure_url'])
         return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
     except Exception as e: 
-        flash(f"🚫 Échec de récupération : {str(e)}", "danger")
+        flash(f"🚫 Échec : {str(e)}", "danger")
         return redirect(url_for('index'))
-
-# --- ROUTES ADMIN ---
-
-@app.route('/admin/logs')
-@login_required
-@admin_required
-def admin_logs():
-    all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
-    return render_template('admin_logs.html', logs=all_logs)
-
-@app.route('/admin/export_logs')
-@login_required
-@admin_required
-def export_logs():
-    all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['ID', 'Timestamp', 'Operateur', 'Action', 'Details'])
-    for log in all_logs:
-        writer.writerow([log.id, log.timestamp, log.username, log.action, log.details])
-    output.seek(0)
-    return send_file(
-        io.BytesIO(output.getvalue().encode('utf-8')),
-        mimetype='text/csv',
-        as_attachment=True,
-        download_name=f"DorkNet_Audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    )
-
-@app.route('/admin/killswitch', methods=['POST'])
-@login_required
-@admin_required
-def trigger_kill_switch():
-    global SYSTEM_ACTIVE
-    SYSTEM_ACTIVE = False
-    send_critical_alert("KILL_SWITCH_ACTIVATED", "Confinement manuel activé par l'administrateur.")
-    db.session.add(AuditLog(username=current_user.username, action="SYS_LOCKDOWN", details="Mode Silence Radio."))
-    db.session.commit()
-    flash("🚨 BASTION VERROUILLÉ.", "danger")
-    return redirect(url_for('admin_logs'))
 
 # --- ROUTE PRINCIPALE ---
 
@@ -270,25 +213,14 @@ def index():
         try:
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
-                cloud_files = [
-                    {
-                        'public_id': r['public_id'], 
-                        'size': f"{r['bytes']/1024:.1f} KB"
-                    } for r in res['resources']
-                ]
-        except Exception as e:
-            print(f"Erreur d'affichage : {e}")
+                cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res['resources']]
+        except Exception as e: print(f"Erreur ressources : {e}")
             
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
 
-# --- BLOC DE DÉMARRAGE AVEC RÉINITIALISATION DB ---
-
 if __name__ == '__main__':
     with app.app_context():
-        # Action corrective pour Render : supprime et recrée les tables
-        db.drop_all() 
         db.create_all() 
-        
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
