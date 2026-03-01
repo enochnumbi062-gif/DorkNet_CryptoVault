@@ -183,7 +183,6 @@ def upload():
     if file:
         try:
             file_content = file.read()
-            # Force resource_type="raw" pour les fichiers chiffrés .enc
             upload_result = cloudinary.uploader.upload(
                 file_content,
                 resource_type="raw",
@@ -207,7 +206,6 @@ def upload():
 @app.route('/download_cloud/<path:public_id>')
 @login_required
 def download_cloud(public_id):
-    # Sécurité Honeytoken
     if "passwords_importants" in public_id.lower():
         error_msg = f"⚠️ INTRUSION par @{current_user.username}."
         db.session.add(AuditLog(username=current_user.username, action="HONEYTOKEN_TRIGGER", details=error_msg))
@@ -217,7 +215,6 @@ def download_cloud(public_id):
         return redirect(url_for('index'))
 
     try:
-        # Récupération en mode 'raw' (indispensable pour les .enc)
         res = cloudinary.api.resource(public_id, resource_type="raw")
         response = requests.get(res['secure_url'])
         return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
@@ -271,7 +268,6 @@ def index():
     cloud_files = []
     if current_user.is_authenticated:
         try:
-            # Récupération des ressources brutes (.enc)
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
                 cloud_files = [
@@ -286,9 +282,13 @@ def index():
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
 
+# --- BLOC DE DÉMARRAGE AVEC RÉINITIALISATION DB ---
+
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all()
-    # Configuration du port pour Render (10000) ou local (5000)
+        # Action corrective pour Render : supprime et recrée les tables
+        db.drop_all() 
+        db.create_all() 
+        
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
