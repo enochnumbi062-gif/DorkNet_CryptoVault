@@ -1,6 +1,7 @@
 import os
 import io
 import csv
+import requests
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
@@ -10,47 +11,41 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash, session, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_mail import Mail, Message
+from flask_apscheduler import APScheduler
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import text
 
 # --- CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ---
 load_dotenv()
 
 app = Flask(__name__)
 
-# --- CONFIGURATION RÉSEAU & PORT (POUR RENDER) ---
-PORT = int(os.environ.get("PORT", 10000))
-
-# --- CONFIGURATION BASE DE DONNÉES (OPTIMISÉE NEON/POSTGRES) ---
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-secure-key-2026')
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
-
-db_url = os.getenv('DATABASE_URL')
-if db_url and db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
-
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    "pool_pre_ping": True, 
-    "pool_recycle": 300,
-    "connect_args": {"sslmode": "require"} if "postgresql" in (db_url or "") else {}
-}
-
-db = SQLAlchemy(app)
-
-# --- SÉCURITÉ & LIMITES ---
-login_manager = LoginManager(app)
-login_manager.login_view = 'index'
-
+# --- CONFIGURATION ANTI-BRUTE FORCE ---
 limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["200 per day", "50 per hour"],
     storage_uri="memory://",
 )
+
+# --- CONFIGURATION GÉNÉRALE & BASE DE DONNÉES ---
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
+
+db_url = os.getenv('DATABASE_URL', 'sqlite:///cryptovault.db')
+if db_url and db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'index'
+
+# --- ÉTAT DU SYSTÈME (KILL SWITCH) ---
+SYSTEM_ACTIVE = True 
 
 # --- CONFIGURATION CLOUDINARY ---
 cloudinary.config(
@@ -59,16 +54,26 @@ cloudinary.config(
   api_secret = os.environ.get('CLOUDINARY_API_SECRET', '').strip()
 )
 
-# --- MODÈLES DE DONNÉES (PLURIEL POUR ÉVITER CONFLITS POSTGRES) ---
+# --- CONFIGURATION EMAIL ---
+app.config.update(
+    MAIL_SERVER='smtp.gmail.com',
+    MAIL_PORT=587,
+    MAIL_USE_TLS=True,
+    MAIL_USERNAME=os.getenv('MAIL_USER'),
+    MAIL_PASSWORD=os.getenv('MAIL_PASS'),
+    MAIL_DEFAULT_SENDER=os.getenv('MAIL_USER')
+)
+
+mail = Mail(app)
+
+# --- MODÈLES DE DONNÉES ---
 class User(UserMixin, db.Model):
-    __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.Text, nullable=False) 
     pin_code = db.Column(db.Text, nullable=True)  
 
 class AuditLog(db.Model):
-    __tablename__ = 'audit_logs'
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
     username = db.Column(db.String(80), nullable=False)
@@ -79,24 +84,180 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- INITIALISATION DES TABLES ---
-with app.app_context():
-    try:
-        db.create_all()
-        print("🚀 BULLDOZER : Base de données synchronisée.")
-    except Exception as e:
-        print(f"❌ Erreur Init DB : {e}")
+# --- DÉCORATEURS DE SÉCURITÉ AVANCÉE ---
 
-# --- DÉCORATEURS ---
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # 1. Vérification de l'identité stricte
         if not current_user.is_authenticated or current_user.username != "Enoch_dorknet":
+            
+            # 2. Gestion du compteur de violations dans la session
+            if 'admin_violation_count' not in session:
+                session['admin_violation_count'] = 0
+            
+            session['admin_violation_count'] += 1
+            
+            # 3. DÉCLENCHEMENT DE LA BOMBE (après 3 tentatives suspectes)
+            if session['admin_violation_count'] >= 3:
+                # LOG de l'incident pour traçabilité
+                db.session.add(AuditLog(
+                    username=current_user.username if current_user.is_authenticated else "INTRUS_ANONYME",
+                    action="BOMBE_DECONNEXION",
+                    details=f"Tentatives répétées sur Panel Admin. IP: {get_remote_address()}"
+                ))
+                db.session.commit()
+                
+                # EXPULSION RADICALE
+                logout_user()
+                session.clear()
+                
+                flash("🚨 ALERTE SÉCURITÉ : Activité suspecte détectée. Session neutralisée.", "danger")
+                return redirect(url_for('index'))
+
+            # Pour les tentatives 1 et 2 : Camouflage total (404)
             abort(404) 
+            
         return f(*args, **kwargs)
     return decorated_function
 
-# --- ROUTES ---
+@app.before_request
+def check_kill_switch():
+    if not SYSTEM_ACTIVE and request.endpoint not in ['index', 'static', 'login', 'logout', 'register']:
+        return "<h1>⚠️ ACCÈS NEUTRALISÉ</h1><p>Le bastion DorkNet CryptoVault est en mode confinement.</p>", 503
+
+# --- ALERTES SÉCURITÉ ---
+
+def send_critical_alert(action, details):
+    with app.app_context():
+        try:
+            msg = Message(
+                subject=f"🚨 [DORKNET] ALERTE SÉCURITÉ : {action}",
+                recipients=[os.getenv('MAIL_USER')]
+            )
+            msg.html = f"<b>Action:</b> {action}<br><b>Détails:</b> {details}"
+            mail.send(msg)
+        except Exception as e: print(f"❌ Erreur mail : {e}")
+
+# --- ROUTES AUTHENTIFICATION ---
+
+@app.route('/register', methods=['POST'])
+def register():
+    username = request.form.get('username')
+    password = generate_password_hash(request.form.get('password'))
+    pin = generate_password_hash(request.form.get('pin'))
+    if User.query.filter_by(username=username).first():
+        flash("Utilisateur déjà existant", "danger")
+        return redirect(url_for('index'))
+    new_user = User(username=username, password=password, pin_code=pin)
+    db.session.add(new_user)
+    db.session.commit()
+    flash("Accès généré avec succès !", "success")
+    return redirect(url_for('index'))
+
+@app.route('/login', methods=['POST'])
+@limiter.limit("10 per hour")
+def login():
+    user = User.query.filter_by(username=request.form.get('username')).first()
+    if user and check_password_hash(user.password, request.form.get('password')):
+        session['pending_user_id'] = user.id
+        return redirect(url_for('verify_2fa'))
+    flash('Identifiants invalides.', "danger")
+    return redirect(url_for('index'))
+
+@app.route('/verify_2fa', methods=['GET', 'POST'])
+@limiter.limit("5 per 15 minutes")
+def verify_2fa():
+    if 'pending_user_id' not in session:
+        return redirect(url_for('index'))
+    if request.method == 'POST':
+        pin = request.form.get('pin')
+        user = User.query.get(session['pending_user_id'])
+        if user and check_password_hash(user.pin_code, pin):
+            login_user(user)
+            session.pop('pending_user_id')
+            db.session.add(AuditLog(username=user.username, action="LOGIN_SUCCESS", details="Accès bastion validé."))
+            db.session.commit()
+            return redirect(url_for('index'))
+        flash("Code PIN incorrect.", "danger")
+    return render_template('2fa.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    db.session.add(AuditLog(username=current_user.username, action="LOGOUT", details="Session terminée."))
+    db.session.commit()
+    logout_user()
+    session.clear()
+    return redirect(url_for('index'))
+
+# --- GESTION FICHIERS & CLOUDINARY ---
+
+@app.route('/upload', methods=['POST'])
+@login_required
+def upload():
+    file = request.files.get('file')
+    if file:
+        try:
+            file_content = file.read()
+            upload_result = cloudinary.uploader.upload(
+                file_content,
+                resource_type="raw",
+                public_id=file.filename,
+                folder="DorkNet_Vault",
+                invalidate=True
+            )
+            db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=file.filename))
+            db.session.commit()
+            flash('Fichier envoyé avec succès !', "success")
+        except Exception as e: flash(f"Erreur : {str(e)}", "danger")
+    return redirect(url_for('index'))
+
+@app.route('/download_cloud/<path:public_id>')
+@login_required
+def download_cloud(public_id):
+    if "passwords" in public_id.lower():
+        send_critical_alert("HONEYTOKEN_TRIGGERED", f"Tentative par {current_user.username}")
+        abort(403)
+    try:
+        res = cloudinary.api.resource(public_id, resource_type="raw")
+        response = requests.get(res['secure_url'])
+        return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
+    except Exception as e: return redirect(url_for('index'))
+
+# --- ROUTES ADMIN AVEC BAN 24H ---
+
+@app.route('/admin/logs')
+@limiter.limit("3 per day", error_message="🚫 ACCÈS BLOQUÉ : Votre IP est bannie pour 24h suite à une violation de sécurité.")
+@login_required
+@admin_required
+def admin_logs():
+    all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
+    return render_template('admin_logs.html', logs=all_logs)
+
+@app.route('/admin/export_logs')
+@login_required
+@admin_required
+def export_logs():
+    all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID', 'Timestamp', 'Operateur', 'Action', 'Details'])
+    for log in all_logs:
+        writer.writerow([log.id, log.timestamp, log.username, log.action, log.details])
+    output.seek(0)
+    return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name="DorkNet_Audit.csv")
+
+@app.route('/admin/killswitch', methods=['POST'])
+@login_required
+@admin_required
+def trigger_kill_switch():
+    global SYSTEM_ACTIVE
+    SYSTEM_ACTIVE = False
+    send_critical_alert("KILL_SWITCH_ACTIVATED", f"Par {current_user.username}")
+    return redirect(url_for('admin_logs'))
+
+# --- ROUTE PRINCIPALE ---
 
 @app.route('/')
 def index():
@@ -106,96 +267,13 @@ def index():
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
                 cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res['resources']]
-        except: pass
+        except Exception as e: print(f"Erreur : {e}")
+            
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
 
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        pwd = generate_password_hash(request.form.get('password'), method='pbkdf2:sha256')
-        pin = generate_password_hash(request.form.get('pin'), method='pbkdf2:sha256')
-        
-        if User.query.filter_by(username=username).first():
-            flash("Utilisateur déjà existant", "danger")
-            return redirect(url_for('index'))
-            
-        new_user = User(username=username, password=pwd, pin_code=pin)
-        db.session.add(new_user)
-        db.session.commit()
-        flash("Compte créé avec succès !", "success")
-        return redirect(url_for('index'))
-    return render_template('register.html')
-
-@app.route('/login', methods=['POST'])
-@limiter.limit("10 per hour")
-def login():
-    user = User.query.filter_by(username=request.form.get('username')).first()
-    if user and check_password_hash(user.password, request.form.get('password')):
-        session['pending_user_id'] = user.id
-        return redirect(url_for('verify_2fa'))
-    flash('Identifiants invalides', "danger")
-    return redirect(url_for('index'))
-
-@app.route('/verify_2fa', methods=['GET', 'POST'])
-def verify_2fa():
-    if 'pending_user_id' not in session: return redirect(url_for('index'))
-    if request.method == 'POST':
-        user = User.query.get(session['pending_user_id'])
-        if user and check_password_hash(user.pin_code, request.form.get('pin')):
-            login_user(user)
-            session.pop('pending_user_id')
-            db.session.add(AuditLog(username=user.username, action="LOGIN_SUCCESS"))
-            db.session.commit()
-            return redirect(url_for('index'))
-        flash("Code PIN erroné", "danger")
-    return render_template('2fa.html')
-
-@app.route('/upload', methods=['POST'])
-@login_required
-def upload():
-    file = request.files.get('file')
-    if file:
-        cloudinary.uploader.upload(file.read(), resource_type="raw", public_id=file.filename, folder="DorkNet_Vault")
-        db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=file.filename))
-        db.session.commit()
-        flash("Fichier sécurisé dans le Cloud.", "success")
-    return redirect(url_for('index'))
-
-@app.route('/export_logs')
-@login_required
-@admin_required
-def export_logs():
-    # Route ajoutée pour éviter le crash du template index.html
-    return "Fonctionnalité d'exportation en cours de maintenance."
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    session.clear()
-    return redirect(url_for('index'))
-
-# --- ROUTE BULLDOZER (RÉPARATION D'URGENCE) ---
-@app.route('/bulldozer-repair/<secret_key>')
-def bulldozer_repair(secret_key):
-    if secret_key != "DorkNet2026":
-        abort(403)
-    try:
-        # Nettoie les anciens débris (singulier et pluriel)
-        db.session.execute(text('DROP TABLE IF EXISTS "user" CASCADE;'))
-        db.session.execute(text('DROP TABLE IF EXISTS "users" CASCADE;'))
-        db.session.execute(text('DROP TABLE IF EXISTS "audit_log" CASCADE;'))
-        db.session.execute(text('DROP TABLE IF EXISTS "audit_logs" CASCADE;'))
-        db.session.commit()
-        
-        # Reconstruction propre sur Neon
-        db.create_all()
-        return "<h1>🚀 RÉPARATION TERMINÉE</h1><p>Tables 'users' et 'audit_logs' créées. <a href='/register'>Inscrivez-vous ici</a>.</p>"
-    except Exception as e:
-        db.session.rollback()
-        return f"<h1>❌ ÉCHEC</h1><p>Erreur : {str(e)}</p>"
-
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT)
+    with app.app_context():
+        db.create_all()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
