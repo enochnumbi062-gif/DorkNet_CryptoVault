@@ -22,13 +22,8 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# --- CONFIGURATION ANTI-BRUTE FORCE ---
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://",
-)
+# --- CONFIGURATION RÉSEAU & PORT (CRITIQUE POUR RENDER) ---
+PORT = int(os.environ.get("PORT", 10000))
 
 # --- CONFIGURATION BASE DE DONNÉES (OPTIMISÉE NEON) ---
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
@@ -39,28 +34,34 @@ if db_url:
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
     if "sslmode" not in db_url:
-        db_url += "?sslmode=require"
+        db_url += ("&" if "?" in db_url else "?") + "sslmode=require"
 else:
     db_url = 'sqlite:///cryptovault.db'
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    "pool_pre_ping": True,
-    "pool_recycle": 300,
-}
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle": 300}
 
 db = SQLAlchemy(app)
 
-# --- INITIALISATION AUTOMATIQUE ---
+# --- INITIALISATION AUTOMATIQUE AU DÉMARRAGE ---
 with app.app_context():
     try:
         db.create_all()
+        print("🚀 BULLDOZER : Tables synchronisées sur Neon.")
     except Exception as e:
-        print(f"⚠️ Erreur d'initialisation DB : {e}")
+        print(f"❌ Erreur Initialisation : {e}")
 
+# --- CONFIGURATION SÉCURITÉ ---
 login_manager = LoginManager(app)
 login_manager.login_view = 'index'
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+)
 
 # --- ÉTAT DU SYSTÈME ---
 SYSTEM_ACTIVE = True 
@@ -101,22 +102,11 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- DÉCORATEURS ET SÉCURITÉ ---
-
+# --- DÉCORATEURS ---
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated or current_user.username != "Enoch_dorknet":
-            if 'admin_violation_count' not in session:
-                session['admin_violation_count'] = 0
-            session['admin_violation_count'] += 1
-            if session['admin_violation_count'] >= 3:
-                db.session.add(AuditLog(username="INTRUS", action="BOMBE_DECONNEXION", details=get_remote_address()))
-                db.session.commit()
-                logout_user()
-                session.clear()
-                flash("🚨 ALERTE SÉCURITÉ", "danger")
-                return redirect(url_for('index'))
             abort(404) 
         return f(*args, **kwargs)
     return decorated_function
@@ -135,22 +125,22 @@ def index():
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
 
-# --- ROUTE BULLDOZER (RÉPARATION À CHAUD) ---
-@app.route('/bulldozer-repair')
-def bulldozer_repair():
+# --- ROUTE BULLDOZER SÉCURISÉE ---
+@app.route('/bulldozer-repair/<secret_key>')
+def bulldozer_repair(secret_key):
+    if secret_key != "DorkNet2026": 
+        db.session.add(AuditLog(username="INTRUS", action="TENTATIVE_BULLDOZER", details=get_remote_address()))
+        db.session.commit()
+        abort(403)
     try:
-        # 1. On force la suppression de la table corrompue
         db.session.execute(text('DROP TABLE IF EXISTS "user" CASCADE;'))
         db.session.execute(text('DROP TABLE IF EXISTS "audit_log" CASCADE;'))
         db.session.commit()
-        
-        # 2. On demande à SQLAlchemy de recréer TOUT à neuf
         db.create_all()
-        
-        return "<h1>🚀 BULLDOZER RÉUSSI !</h1><p>Les tables ont été reconstruites à neuf sur Neon. <a href='/register'>Testez l'inscription ici</a>.</p>"
+        return "<h1>🔥 RESET TOTAL RÉUSSI</h1><p>Tables reconstruites. <a href='/register'>Inscrivez-vous ici</a>.</p>"
     except Exception as e:
         db.session.rollback()
-        return f"<h1>❌ ÉCHEC</h1><p>Erreur : {str(e)}</p>"
+        return f"Erreur : {str(e)}"
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -159,11 +149,13 @@ def register():
         pwd = generate_password_hash(request.form.get('password'), method='pbkdf2:sha256')
         pin = generate_password_hash(request.form.get('pin'), method='pbkdf2:sha256')
         if User.query.filter_by(username=username).first():
-            return "Utilisateur déjà existant"
+            flash("Utilisateur existant", "danger")
+            return redirect(url_for('index'))
         db.session.add(User(username=username, password=pwd, pin_code=pin))
         db.session.commit()
+        flash("Compte créé !", "success")
         return redirect(url_for('index'))
-    return render_template('register.html') # Assurez-vous d'avoir ce template ou utilisez un simple formulaire HTML
+    return render_template('register.html')
 
 @app.route('/login', methods=['POST'])
 @limiter.limit("10 per hour")
@@ -172,7 +164,7 @@ def login():
     if user and check_password_hash(user.password, request.form.get('password')):
         session['pending_user_id'] = user.id
         return redirect(url_for('verify_2fa'))
-    flash('Invalide', "danger")
+    flash('Identifiants invalides', "danger")
     return redirect(url_for('index'))
 
 @app.route('/verify_2fa', methods=['GET', 'POST'])
@@ -188,13 +180,6 @@ def verify_2fa():
             return redirect(url_for('index'))
     return render_template('2fa.html')
 
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    session.clear()
-    return redirect(url_for('index'))
-
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload():
@@ -205,13 +190,13 @@ def upload():
         db.session.commit()
     return redirect(url_for('index'))
 
-@app.route('/admin/logs')
+@app.route('/logout')
 @login_required
-@admin_required
-def admin_logs():
-    all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
-    return render_template('admin_logs.html', logs=all_logs)
+def logout():
+    logout_user()
+    session.clear()
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    # Le host 0.0.0.0 est obligatoire pour que Render puisse scanner le port
+    app.run(host='0.0.0.0', port=PORT)
