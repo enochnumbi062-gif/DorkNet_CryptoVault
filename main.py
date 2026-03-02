@@ -84,14 +84,16 @@ app.config.update(
 )
 mail = Mail(app)
 
-# --- MODÈLES DE DONNÉES ---
+# --- MODÈLES DE DONNÉES (VERSION STABLE POSTGRES) ---
 class User(UserMixin, db.Model):
+    __tablename__ = 'users'  # Évite le conflit avec le mot réservé 'user'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.Text, nullable=False) 
     pin_code = db.Column(db.Text, nullable=True)  
 
 class AuditLog(db.Model):
+    __tablename__ = 'audit_logs' # Utilise le pluriel pour la consistance
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
     username = db.Column(db.String(80), nullable=False)
@@ -125,7 +127,7 @@ def index():
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
 
-# --- ROUTE BULLDOZER SÉCURISÉE ---
+# --- ROUTE BULLDOZER (RÉPARATION À CHAUD) ---
 @app.route('/bulldozer-repair/<secret_key>')
 def bulldozer_repair(secret_key):
     if secret_key != "DorkNet2026": 
@@ -133,14 +135,19 @@ def bulldozer_repair(secret_key):
         db.session.commit()
         abort(403)
     try:
+        # Nettoyage total des anciennes structures problématiques
         db.session.execute(text('DROP TABLE IF EXISTS "user" CASCADE;'))
+        db.session.execute(text('DROP TABLE IF EXISTS "users" CASCADE;'))
         db.session.execute(text('DROP TABLE IF EXISTS "audit_log" CASCADE;'))
+        db.session.execute(text('DROP TABLE IF EXISTS "audit_logs" CASCADE;'))
         db.session.commit()
+        
+        # Reconstruction propre
         db.create_all()
-        return "<h1>🔥 RESET TOTAL RÉUSSI</h1><p>Tables reconstruites. <a href='/register'>Inscrivez-vous ici</a>.</p>"
+        return "<h1>🚀 RÉPARATION TERMINÉE</h1><p>Tables 'users' et 'audit_logs' créées proprement sur Neon. <a href='/register'>Inscrivez-vous ici</a>.</p>"
     except Exception as e:
         db.session.rollback()
-        return f"Erreur : {str(e)}"
+        return f"<h1>❌ ÉCHEC</h1><p>Erreur : {str(e)}</p>"
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -153,7 +160,7 @@ def register():
             return redirect(url_for('index'))
         db.session.add(User(username=username, password=pwd, pin_code=pin))
         db.session.commit()
-        flash("Compte créé !", "success")
+        flash("Accès créé avec succès !", "success")
         return redirect(url_for('index'))
     return render_template('register.html')
 
@@ -178,6 +185,7 @@ def verify_2fa():
             db.session.add(AuditLog(username=user.username, action="LOGIN_SUCCESS"))
             db.session.commit()
             return redirect(url_for('index'))
+        flash("PIN incorrect", "danger")
     return render_template('2fa.html')
 
 @app.route('/upload', methods=['POST'])
@@ -198,5 +206,4 @@ def logout():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    # Le host 0.0.0.0 est obligatoire pour que Render puisse scanner le port
     app.run(host='0.0.0.0', port=PORT)
