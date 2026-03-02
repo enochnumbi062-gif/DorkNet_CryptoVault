@@ -22,7 +22,6 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- CONFIGURATION ANTI-BRUTE FORCE ---
-# On garde la mémoire vive pour le stockage du Limiter sur Render
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -34,7 +33,6 @@ limiter = Limiter(
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 
-# Correction automatique pour PostgreSQL (Neon nécessite souvent sslmode=require)
 db_url = os.getenv('DATABASE_URL')
 if db_url:
     if db_url.startswith("postgres://"):
@@ -52,6 +50,16 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 }
 
 db = SQLAlchemy(app)
+
+# --- INITIALISATION AUTOMATIQUE DU TERRITOIRE (FORCÉE) ---
+# Ce bloc s'exécute même sous Gunicorn pour créer les tables sur Neon
+with app.app_context():
+    try:
+        db.create_all()
+        print("✅ Base de données Neon synchronisée (Tables créées ou déjà existantes).")
+    except Exception as e:
+        print(f"⚠️ Erreur d'initialisation DB : {e}")
+
 login_manager = LoginManager(app)
 login_manager.login_view = 'index'
 
@@ -136,14 +144,17 @@ def index():
 
 @app.route('/register', methods=['POST'])
 def register():
-    # Utilisation de pbkdf2:sha256 pour compatibilité maximale
+    username = request.form.get('username')
     pwd = generate_password_hash(request.form.get('password'), method='pbkdf2:sha256')
     pin = generate_password_hash(request.form.get('pin'), method='pbkdf2:sha256')
-    if User.query.filter_by(username=request.form.get('username')).first():
-        flash("Existant", "danger")
+    
+    if User.query.filter_by(username=username).first():
+        flash("Utilisateur déjà existant", "danger")
         return redirect(url_for('index'))
-    db.session.add(User(username=request.form.get('username'), password=pwd, pin_code=pin))
+    
+    db.session.add(User(username=username, password=pwd, pin_code=pin))
     db.session.commit()
+    flash("Accès au bastion généré !", "success")
     return redirect(url_for('index'))
 
 @app.route('/login', methods=['POST'])
@@ -153,7 +164,7 @@ def login():
     if user and check_password_hash(user.password, request.form.get('password')):
         session['pending_user_id'] = user.id
         return redirect(url_for('verify_2fa'))
-    flash('Invalide', "danger")
+    flash('Identifiants invalides', "danger")
     return redirect(url_for('index'))
 
 @app.route('/verify_2fa', methods=['GET', 'POST'])
@@ -168,6 +179,7 @@ def verify_2fa():
             db.session.add(AuditLog(username=user.username, action="LOGIN_SUCCESS"))
             db.session.commit()
             return redirect(url_for('index'))
+        flash("Code PIN erroné", "danger")
     return render_template('2fa.html')
 
 @app.route('/logout')
@@ -185,9 +197,8 @@ def upload():
         cloudinary.uploader.upload(file.read(), resource_type="raw", public_id=file.filename, folder="DorkNet_Vault")
         db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=file.filename))
         db.session.commit()
+        flash("Fichier envoyé au coffre-fort.", "success")
     return redirect(url_for('index'))
-
-# --- ADMIN ---
 
 @app.route('/admin/logs')
 @limiter.limit("3 per day")
@@ -198,8 +209,5 @@ def admin_logs():
     return render_template('admin_logs.html', logs=all_logs)
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-    # Forcer le port 10000 pour Render si non défini
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
