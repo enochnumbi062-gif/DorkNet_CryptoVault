@@ -11,4 +11,6 @@ gunicorn
 flask-mail
 flask-apscheduler
 Flask-Limiter
-
+flask-talisman
+flask-wtf
+python-magic
