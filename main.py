@@ -1,57 +1,26 @@
 import os
 import io
 import csv
-import time
-import magic
-import ctypes
-import sys
 import requests
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import wraps
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash, session, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_mail import Mail, Message
+from flask_apscheduler import APScheduler
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_talisman import Talisman
-from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
 
 # --- CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ---
 load_dotenv()
 
 app = Flask(__name__)
-
-# --- CONFIGURATION DU BOUCLIER HTTP (TALISMAN) ---
-csp = {
-    'default-src': '\'self\'',
-    'script-src': [
-        '\'self\'',
-        'https://cdn.jsdelivr.net'
-    ],
-    'style-src': [
-        '\'self\'',
-        'https://cdn.jsdelivr.net',
-        '\'unsafe-inline\'' 
-    ]
-}
-
-talisman = Talisman(
-    app,
-    content_security_policy=csp,
-    force_https=True,
-    session_cookie_secure=True,
-    session_cookie_http_only=True
-)
-
-# --- PROTECTION CSRF (FLASK-WTF) ---
-csrf = CSRFProtect(app)
 
 # --- CONFIGURATION ANTI-BRUTE FORCE ---
 limiter = Limiter(
@@ -61,10 +30,9 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-# --- CONFIGURATION GÉNÉRALE & BDD ---
+# --- CONFIGURATION GÉNÉRALE & BASE DE DONNÉES ---
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
-ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'enc'}
 
 db_url = os.getenv('DATABASE_URL', 'sqlite:///cryptovault.db')
 if db_url and db_url.startswith("postgres://"):
@@ -76,6 +44,7 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'index'
 
+# --- ÉTAT DU SYSTÈME (KILL SWITCH) ---
 SYSTEM_ACTIVE = True 
 
 # --- CONFIGURATION CLOUDINARY ---
@@ -94,6 +63,7 @@ app.config.update(
     MAIL_PASSWORD=os.getenv('MAIL_PASS'),
     MAIL_DEFAULT_SENDER=os.getenv('MAIL_USER')
 )
+
 mail = Mail(app)
 
 # --- MODÈLES DE DONNÉES ---
@@ -114,57 +84,63 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- MÉMOIRE VIVE : PROTOCOLE D'EFFACEMENT ---
-def wipe_memory(variable):
-    if not isinstance(variable, (str, bytes, bytearray)):
-        return False
-    location = id(variable)
-    size = sys.getsizeof(variable)
-    try:
-        offset = 32 if isinstance(variable, str) else 20
-        ctypes.memset(location + offset, 0, size - offset)
-        return True
-    except Exception as e:
-        print(f"⚠️ Erreur de Wiper : {e}")
-        return False
+# --- DÉCORATEURS DE SÉCURITÉ AVANCÉE ---
 
-# --- DÉCORATEURS ---
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # 1. Vérification de l'identité stricte
         if not current_user.is_authenticated or current_user.username != "Enoch_dorknet":
+            
+            # 2. Gestion du compteur de violations dans la session
             if 'admin_violation_count' not in session:
                 session['admin_violation_count'] = 0
+            
             session['admin_violation_count'] += 1
+            
+            # 3. DÉCLENCHEMENT DE LA BOMBE (après 3 tentatives suspectes)
             if session['admin_violation_count'] >= 3:
+                # LOG de l'incident pour traçabilité
                 db.session.add(AuditLog(
                     username=current_user.username if current_user.is_authenticated else "INTRUS_ANONYME",
                     action="BOMBE_DECONNEXION",
-                    details=f"Violation répétée. IP: {get_remote_address()}"
+                    details=f"Tentatives répétées sur Panel Admin. IP: {get_remote_address()}"
                 ))
                 db.session.commit()
+                
+                # EXPULSION RADICALE
                 logout_user()
                 session.clear()
-                flash("🚨 ALERTE SÉCURITÉ : Session neutralisée.", "danger")
+                
+                flash("🚨 ALERTE SÉCURITÉ : Activité suspecte détectée. Session neutralisée.", "danger")
                 return redirect(url_for('index'))
+
+            # Pour les tentatives 1 et 2 : Camouflage total (404)
             abort(404) 
+            
         return f(*args, **kwargs)
     return decorated_function
 
 @app.before_request
 def check_kill_switch():
     if not SYSTEM_ACTIVE and request.endpoint not in ['index', 'static', 'login', 'logout', 'register']:
-        return "<h1>⚠️ ACCÈS NEUTRALISÉ</h1>", 503
+        return "<h1>⚠️ ACCÈS NEUTRALISÉ</h1><p>Le bastion DorkNet CryptoVault est en mode confinement.</p>", 503
+
+# --- ALERTES SÉCURITÉ ---
 
 def send_critical_alert(action, details):
     with app.app_context():
         try:
-            msg = Message(subject=f"🚨 [DORKNET] ALERTE : {action}", recipients=[os.getenv('MAIL_USER')])
+            msg = Message(
+                subject=f"🚨 [DORKNET] ALERTE SÉCURITÉ : {action}",
+                recipients=[os.getenv('MAIL_USER')]
+            )
             msg.html = f"<b>Action:</b> {action}<br><b>Détails:</b> {details}"
             mail.send(msg)
         except Exception as e: print(f"❌ Erreur mail : {e}")
 
 # --- ROUTES AUTHENTIFICATION ---
+
 @app.route('/register', methods=['POST'])
 def register():
     username = request.form.get('username')
@@ -176,38 +152,32 @@ def register():
     new_user = User(username=username, password=password, pin_code=pin)
     db.session.add(new_user)
     db.session.commit()
-    flash("Accès généré !", "success")
+    flash("Accès généré avec succès !", "success")
     return redirect(url_for('index'))
 
 @app.route('/login', methods=['POST'])
-@limiter.limit("5 per minute")
+@limiter.limit("10 per hour")
 def login():
-    username_input = request.form.get('username')
-    password_input = request.form.get('password')
-    time.sleep(0.5) # Anti-Timing Attack
-    user = User.query.filter_by(username=username_input).first()
-    if user and check_password_hash(user.password, password_input):
+    user = User.query.filter_by(username=request.form.get('username')).first()
+    if user and check_password_hash(user.password, request.form.get('password')):
         session['pending_user_id'] = user.id
         return redirect(url_for('verify_2fa'))
-    db.session.add(AuditLog(username=username_input or "INCONNU", action="LOGIN_FAILED", details="Tentative rejetée."))
-    db.session.commit()
-    flash('Accès refusé par le protocole.', "danger")
-    wipe_memory(password_input)
+    flash('Identifiants invalides.', "danger")
     return redirect(url_for('index'))
 
 @app.route('/verify_2fa', methods=['GET', 'POST'])
 @limiter.limit("5 per 15 minutes")
 def verify_2fa():
-    if 'pending_user_id' not in session: return redirect(url_for('index'))
+    if 'pending_user_id' not in session:
+        return redirect(url_for('index'))
     if request.method == 'POST':
         pin = request.form.get('pin')
         user = User.query.get(session['pending_user_id'])
         if user and check_password_hash(user.pin_code, pin):
             login_user(user)
             session.pop('pending_user_id')
-            db.session.add(AuditLog(username=user.username, action="LOGIN_SUCCESS", details="Bastion validé."))
+            db.session.add(AuditLog(username=user.username, action="LOGIN_SUCCESS", details="Accès bastion validé."))
             db.session.commit()
-            wipe_memory(pin)
             return redirect(url_for('index'))
         flash("Code PIN incorrect.", "danger")
     return render_template('2fa.html')
@@ -221,45 +191,44 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
-# --- GESTION FICHIERS (DPI & ANTI-MALWARE) ---
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+# --- GESTION FICHIERS & CLOUDINARY ---
 
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload():
-    if 'file' not in request.files: return redirect(url_for('index'))
-    file = request.files['file']
-    if file.filename == '': return redirect(url_for('index'))
-    filename = secure_filename(file.filename)
-    if file and allowed_file(filename):
-        file_content = file.read()
-        file_type = magic.from_buffer(file_content, mime=True)
-        if any(x in file_type for x in ["python", "executable", "shell"]):
-            db.session.add(AuditLog(username=current_user.username, action="MALWARE_DETECTED", details=f"Fichier bloqué : {filename}"))
-            db.session.commit()
-            return "🚨 ALERTE : Contenu malveillant détecté.", 403
+    file = request.files.get('file')
+    if file:
         try:
-            cloudinary.uploader.upload(file_content, resource_type="raw", public_id=filename, folder="DorkNet_Vault", invalidate=True)
-            db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=filename))
+            file_content = file.read()
+            upload_result = cloudinary.uploader.upload(
+                file_content,
+                resource_type="raw",
+                public_id=file.filename,
+                folder="DorkNet_Vault",
+                invalidate=True
+            )
+            db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=file.filename))
             db.session.commit()
-            flash('Fichier analysé et sécurisé !', "success")
-        except Exception as e: flash(f"Erreur Cloud : {str(e)}", "danger")
-        finally: wipe_memory(file_content)
+            flash('Fichier envoyé avec succès !', "success")
+        except Exception as e: flash(f"Erreur : {str(e)}", "danger")
     return redirect(url_for('index'))
 
 @app.route('/download_cloud/<path:public_id>')
 @login_required
 def download_cloud(public_id):
+    if "passwords" in public_id.lower():
+        send_critical_alert("HONEYTOKEN_TRIGGERED", f"Tentative par {current_user.username}")
+        abort(403)
     try:
         res = cloudinary.api.resource(public_id, resource_type="raw")
         response = requests.get(res['secure_url'])
         return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
     except Exception as e: return redirect(url_for('index'))
 
-# --- ADMINISTRATION ---
+# --- ROUTES ADMIN AVEC BAN 24H ---
+
 @app.route('/admin/logs')
-@limiter.limit("3 per day")
+@limiter.limit("3 per day", error_message="🚫 ACCÈS BLOQUÉ : Votre IP est bannie pour 24h suite à une violation de sécurité.")
 @login_required
 @admin_required
 def admin_logs():
@@ -288,6 +257,8 @@ def trigger_kill_switch():
     send_critical_alert("KILL_SWITCH_ACTIVATED", f"Par {current_user.username}")
     return redirect(url_for('admin_logs'))
 
+# --- ROUTE PRINCIPALE ---
+
 @app.route('/')
 def index():
     cloud_files = []
@@ -296,13 +267,13 @@ def index():
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
                 cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res['resources']]
-        except: pass
+        except Exception as e: print(f"Erreur : {e}")
+            
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
 
-# --- DÉMARRAGE AVEC DÉTECTION DE PORT RENDER ---
-if __name__ == "__main__":
+if __name__ == '__main__':
     with app.app_context():
         db.create_all()
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host='0.0.0.0', port=port)
