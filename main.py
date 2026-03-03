@@ -98,7 +98,6 @@ DORKNET_STYLE = """
 
 # --- SÉCURITÉ & PROTECTION ---
 csrf = CSRFProtect(app)
-# CSP assoupli pour permettre le style inline du DORKNET_STYLE
 talisman = Talisman(
     app,
     content_security_policy=None, 
@@ -114,7 +113,7 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-# --- CONFIGURATION GÉNÉRALE ---
+# --- CONFIGURATION GÉNÉRALE & BDD ---
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'enc'}
@@ -138,7 +137,7 @@ cloudinary.config(
   api_secret = os.environ.get('CLOUDINARY_API_SECRET', '').strip()
 )
 
-# --- CONFIGURATION EMAIL ---
+# --- EMAIL ---
 app.config.update(
     MAIL_SERVER='smtp.gmail.com',
     MAIL_PORT=587,
@@ -149,7 +148,7 @@ app.config.update(
 )
 mail = Mail(app)
 
-# --- MODÈLES DE DONNÉES ---
+# --- MODÈLES ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -169,7 +168,7 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- DÉCORATEURS ET UTILITAIRES ---
+# --- DÉCORATEURS ---
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -183,28 +182,18 @@ def check_kill_switch():
     if not SYSTEM_ACTIVE and request.endpoint not in ['index', 'static', 'login', 'logout', 'register']:
         return "<h1>⚠️ ACCÈS NEUTRALISÉ - DORKNET BASTION</h1>", 503
 
-def send_critical_alert(action, details):
-    with app.app_context():
+# --- ROUTES ---
+@app.route('/')
+def index():
+    cloud_files = []
+    if current_user.is_authenticated:
         try:
-            msg = Message(subject=f"🚨 [DORKNET] ALERTE : {action}", recipients=[os.getenv('MAIL_USER')])
-            msg.html = f"<b>Action:</b> {action}<br><b>Détails:</b> {details}"
-            mail.send(msg)
-        except Exception as e: print(f"❌ Erreur mail : {e}")
-
-# --- ROUTES AUTHENTIFICATION ---
-@app.route('/register', methods=['POST'])
-def register():
-    username = request.form.get('username')
-    password = generate_password_hash(request.form.get('password'))
-    pin = generate_password_hash(request.form.get('pin'))
-    if User.query.filter_by(username=username).first():
-        flash("Utilisateur déjà existant", "danger")
-        return redirect(url_for('index'))
-    new_user = User(username=username, password=password, pin_code=pin)
-    db.session.add(new_user)
-    db.session.commit()
-    flash("Accès généré avec succès !", "success")
-    return redirect(url_for('index'))
+            res = cloudinary.api.resources(resource_type="raw", prefix="DorkNet_Vault/")
+            if 'resources' in res:
+                cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res['resources']]
+        except: pass
+    logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(5).all() if current_user.is_authenticated else []
+    return render_template('index.html', files=cloud_files, logs=logs, style=DORKNET_STYLE)
 
 @app.route('/login', methods=['POST'])
 @limiter.limit("5 per minute")
@@ -231,7 +220,6 @@ def login():
         user.failed_attempts += 1
         if user.failed_attempts >= 5:
             user.lockout_until = datetime.now() + timedelta(minutes=30)
-            send_critical_alert("COMPTE_VERROUILLÉ", username_input)
         db.session.commit()
         time.sleep(0.5)
         flash('Identifiants invalides.', "danger")
@@ -252,92 +240,43 @@ def verify_2fa():
         flash("Code PIN incorrect.", "danger")
     return render_template('2fa.html', style=DORKNET_STYLE)
 
-@app.route('/logout')
-@login_required
-def logout():
-    db.session.add(AuditLog(username=current_user.username, action="LOGOUT", details="Session terminée."))
-    db.session.commit()
-    logout_user()
-    session.clear()
-    return redirect(url_for('index'))
-
-# --- GESTION FICHIERS ---
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload():
     file = request.files.get('file')
-    if not file or file.filename == '': return redirect(url_for('index'))
+    if not file: return redirect(url_for('index'))
     filename = secure_filename(file.filename)
-    
-    # Vérification extension et type MIME profond
-    if ('.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS):
-        try:
-            file_content = file.read()
-            file_type = magic.from_buffer(file_content, mime=True)
-            if any(x in file_type for x in ["python", "executable", "shell"]):
-                db.session.add(AuditLog(username=current_user.username, action="MALWARE_DETECTED", details=filename))
-                db.session.commit()
-                return "🚨 ALERTE : Contenu malveillant détecté.", 403
-
-            cloudinary.uploader.upload(file_content, resource_type="raw", public_id=filename, folder="DorkNet_Vault")
-            db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=filename))
-            db.session.commit()
-            flash('Fichier sécurisé envoyé !', "success")
-        except Exception as e: flash(f"Erreur : {str(e)}", "danger")
+    try:
+        content = file.read()
+        file_type = magic.from_buffer(content, mime=True)
+        if any(x in file_type for x in ["python", "executable", "shell"]):
+            return "🚨 ALERTE : Contenu malveillant détecté.", 403
+        cloudinary.uploader.upload(content, resource_type="raw", public_id=filename, folder="DorkNet_Vault")
+        db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=filename))
+        db.session.commit()
+        flash('Fichier sécurisé !', "success")
+    except Exception as e: flash(f"Erreur : {str(e)}", "danger")
     return redirect(url_for('index'))
 
-@app.route('/download/<path:public_id>')
-@login_required
-def download_file(public_id):
-    try:
-        res = cloudinary.api.resource(public_id, resource_type="raw")
-        response = requests.get(res['secure_url'])
-        return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id.split('/')[-1])
-    except Exception as e: return redirect(url_for('index'))
-
-# --- ADMINISTRATION ---
-@app.route('/admin/logs')
-@login_required
-@admin_required
-def admin_logs():
-    all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
-    return render_template('admin_logs.html', logs=all_logs, style=DORKNET_STYLE)
-
-@app.route('/admin/killswitch', methods=['POST'])
-@login_required
-@admin_required
-def trigger_kill_switch():
-    global SYSTEM_ACTIVE
-    SYSTEM_ACTIVE = False
-    send_critical_alert("KILL_SWITCH_ACTIVATED", f"Par {current_user.username}")
-    return redirect(url_for('admin_logs'))
-
-# --- ROUTE PRINCIPALE ---
-@app.route('/')
-def index():
-    cloud_files = []
-    if current_user.is_authenticated:
-        try:
-            res = cloudinary.api.resources(resource_type="raw", prefix="DorkNet_Vault/")
-            if 'resources' in res:
-                cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res['resources']]
-        except: pass
-    logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(5).all() if current_user.is_authenticated else []
-    return render_template('index.html', files=cloud_files, logs=logs, style=DORKNET_STYLE)
+@app.route('/logout')
+def logout():
+    logout_user()
+    return redirect(url_for('index'))
 
 # --- DÉMARRAGE ET RÉPARATION DB ---
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        # Correction automatique de l'erreur 500 (colonnes manquantes)
+        # Correction pour PostgreSQL (Render)
         try:
+            # On utilise des guillemets doubles pour le nom de la table "user"
             db.session.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0'))
             db.session.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS lockout_until TIMESTAMP'))
             db.session.commit()
-            print("🛡️ DorkNet : Schéma DB validé et sécurisé.")
+            print("✅ Schéma DorkNet mis à jour.")
         except Exception as e:
             db.session.rollback()
-            print(f"ℹ️ Migration DB : {e}")
+            print(f"ℹ️ Migration ignorée : {e}")
 
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
