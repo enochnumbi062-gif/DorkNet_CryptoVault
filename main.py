@@ -30,49 +30,83 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# --- CONFIGURATION DU DESIGN DORKNET (À injecter dans vos templates) ---
-# Ces styles garantissent le rendu "Terminal Néon" demandé.
+# --- STYLE TERMINAL RESTAURÉ (IMAGE 1) ---
 DORKNET_STYLE = """
-:root { 
-    --primary: #00ff41; 
-    --bg: #0d1117; 
-    --card: #161b22; 
-    --text: #c9d1d9; 
-    --border: #30363d; 
-}
-body { 
-    background-color: var(--bg) !important; 
-    color: var(--text); 
-    font-family: 'Courier New', monospace; 
-}
-.container { 
-    background: var(--card); 
-    border: 1px solid var(--primary); 
-    box-shadow: 0 0 20px rgba(0, 255, 65, 0.2); 
-}
-button { 
-    background: var(--primary) !important; 
-    color: black !important; 
-    box-shadow: 0 0 10px var(--primary); 
-}
+<style>
+    :root { 
+        --primary: #00ff41; 
+        --bg: #0d1117; 
+        --card: #161b22; 
+        --text: #c9d1d9; 
+        --border: #30363d; 
+        --danger: #ff3e3e;
+    }
+    body { 
+        background-color: var(--bg) !important; 
+        color: var(--text); 
+        font-family: 'Courier New', monospace; 
+        margin: 0; padding: 20px;
+    }
+    .container { 
+        background: var(--card); 
+        border: 2px solid var(--primary); 
+        box-shadow: 0 0 20px rgba(0, 255, 65, 0.2); 
+        border-radius: 10px;
+        padding: 25px;
+        max-width: 800px;
+        margin: auto;
+    }
+    .header-box {
+        border: 2px solid var(--primary);
+        padding: 15px;
+        text-align: center;
+        margin-bottom: 30px;
+        position: relative;
+    }
+    .header-box h1 { color: var(--primary); text-transform: uppercase; letter-spacing: 5px; margin: 0; }
+    .status-line { color: var(--primary); font-size: 0.8em; margin-top: 10px; }
+    
+    input, select {
+        background: #000 !important;
+        border: 1px solid var(--primary) !important;
+        color: var(--primary) !important;
+        padding: 10px;
+        width: 100%;
+        margin-bottom: 15px;
+        border-radius: 5px;
+    }
+    .btn-terminal {
+        background: var(--primary) !important;
+        color: #000 !important;
+        font-weight: bold;
+        text-transform: uppercase;
+        border: none;
+        padding: 12px;
+        width: 100%;
+        cursor: pointer;
+        box-shadow: 0 0 15px var(--primary);
+        transition: 0.3s;
+        margin-top: 10px;
+    }
+    .btn-terminal:hover { opacity: 0.8; box-shadow: 0 0 25px var(--primary); }
+    .logout-link { color: var(--danger); text-decoration: none; font-weight: bold; }
+    .operator-tag { color: var(--primary); font-weight: bold; }
+    .file-item { border-bottom: 1px solid var(--border); padding: 10px 0; color: #8b949e; display: flex; justify-content: space-between; }
+    .alert { padding: 10px; border: 1px solid var(--primary); margin-bottom: 20px; background: rgba(0,255,65,0.1); }
+</style>
 """
 
-# --- PROTECTION CSRF & BOUCLIER HTTP ---
+# --- SÉCURITÉ & PROTECTION ---
 csrf = CSRFProtect(app)
-csp = {
-    'default-src': "'self'",
-    'script-src': ["'self'", 'https://cdn.jsdelivr.net', 'https://cdnjs.cloudflare.com'],
-    'style-src': ["'self'", 'https://cdn.jsdelivr.net', 'https://cdnjs.cloudflare.com', "'unsafe-inline'"]
-}
+# CSP assoupli pour permettre le style inline du DORKNET_STYLE
 talisman = Talisman(
     app,
-    content_security_policy=csp,
+    content_security_policy=None, 
     force_https=True,
     session_cookie_secure=True,
     session_cookie_http_only=True
 )
 
-# --- CONFIGURATION ANTI-BRUTE FORCE ---
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -80,7 +114,7 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-# --- CONFIGURATION GÉNÉRALE & BASE DE DONNÉES ---
+# --- CONFIGURATION GÉNÉRALE ---
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'enc'}
@@ -95,10 +129,9 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'index'
 
-# --- ÉTAT DU SYSTÈME (KILL SWITCH) ---
 SYSTEM_ACTIVE = True 
 
-# --- CONFIGURATION CLOUDINARY ---
+# --- CLOUDINARY ---
 cloudinary.config(
   cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME', '').strip(),
   api_key = os.environ.get('CLOUDINARY_API_KEY', '').strip(),
@@ -116,7 +149,7 @@ app.config.update(
 )
 mail = Mail(app)
 
-# --- MODÈLES DE DONNÉES SÉCURISÉS ---
+# --- MODÈLES DE DONNÉES ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -136,7 +169,7 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- DÉCORATEURS ---
+# --- DÉCORATEURS ET UTILITAIRES ---
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -186,7 +219,7 @@ def login():
         return redirect(url_for('index'))
 
     if user.lockout_until and user.lockout_until > datetime.now():
-        return f"<h1>COMPTE SCELLÉ - Réessayez plus tard.</h1>", 403
+        return f"<h1>COMPTE SCELLÉ - Réessayez après {user.lockout_until}</h1>", 403
 
     if check_password_hash(user.password, password_input):
         user.failed_attempts = 0
@@ -217,7 +250,7 @@ def verify_2fa():
             db.session.commit()
             return redirect(url_for('index'))
         flash("Code PIN incorrect.", "danger")
-    return render_template('2fa.html')
+    return render_template('2fa.html', style=DORKNET_STYLE)
 
 @app.route('/logout')
 @login_required
@@ -235,6 +268,8 @@ def upload():
     file = request.files.get('file')
     if not file or file.filename == '': return redirect(url_for('index'))
     filename = secure_filename(file.filename)
+    
+    # Vérification extension et type MIME profond
     if ('.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS):
         try:
             file_content = file.read()
@@ -242,7 +277,7 @@ def upload():
             if any(x in file_type for x in ["python", "executable", "shell"]):
                 db.session.add(AuditLog(username=current_user.username, action="MALWARE_DETECTED", details=filename))
                 db.session.commit()
-                return "🚨 ALERTE : Contenu malveillant.", 403
+                return "🚨 ALERTE : Contenu malveillant détecté.", 403
 
             cloudinary.uploader.upload(file_content, resource_type="raw", public_id=filename, folder="DorkNet_Vault")
             db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=filename))
@@ -251,13 +286,22 @@ def upload():
         except Exception as e: flash(f"Erreur : {str(e)}", "danger")
     return redirect(url_for('index'))
 
-# --- ROUTES ADMIN ---
+@app.route('/download/<path:public_id>')
+@login_required
+def download_file(public_id):
+    try:
+        res = cloudinary.api.resource(public_id, resource_type="raw")
+        response = requests.get(res['secure_url'])
+        return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id.split('/')[-1])
+    except Exception as e: return redirect(url_for('index'))
+
+# --- ADMINISTRATION ---
 @app.route('/admin/logs')
 @login_required
 @admin_required
 def admin_logs():
     all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
-    return render_template('admin_logs.html', logs=all_logs)
+    return render_template('admin_logs.html', logs=all_logs, style=DORKNET_STYLE)
 
 @app.route('/admin/killswitch', methods=['POST'])
 @login_required
@@ -274,23 +318,23 @@ def index():
     cloud_files = []
     if current_user.is_authenticated:
         try:
-            res = cloudinary.api.resources(resource_type="raw")
+            res = cloudinary.api.resources(resource_type="raw", prefix="DorkNet_Vault/")
             if 'resources' in res:
                 cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res['resources']]
         except: pass
-    logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
+    logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(5).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs, style=DORKNET_STYLE)
 
-# --- DÉMARRAGE & MIGRATION ---
+# --- DÉMARRAGE ET RÉPARATION DB ---
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        # --- MIGRATION AUTOMATIQUE DES COLONNES ---
+        # Correction automatique de l'erreur 500 (colonnes manquantes)
         try:
             db.session.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0'))
             db.session.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS lockout_until TIMESTAMP'))
             db.session.commit()
-            print("✅ Schéma DB mis à jour pour la sécurité.")
+            print("🛡️ DorkNet : Schéma DB validé et sécurisé.")
         except Exception as e:
             db.session.rollback()
             print(f"ℹ️ Migration DB : {e}")
