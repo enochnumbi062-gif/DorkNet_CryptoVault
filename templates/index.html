@@ -39,11 +39,13 @@
             <h1><i class="fas fa-network-wired"></i> DORKNET <span style="font-weight: 300;">CRYPTOVAULT</span></h1>
             <small style="color: var(--primary); letter-spacing: 5px; display: block; margin-top: 10px;">CRYPTOGRAPHIC VAULT v2.0</small>
         </div>
+
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}{% for category, message in messages %}
             <div class="flash flash-{{ category }}">{{ message }}</div>
           {% endfor %}{% endif %}
         {% endwith %}
+
         {% if current_user.is_authenticated %}
             <div class="user-panel">
                 <a href="javascript:void(0);" onclick="confirmLogout()" class="logout-link">
@@ -60,6 +62,7 @@
                         <div id="encryption-status"><i class="fas fa-spinner fa-spin"></i> Chiffrement local en cours...</div>
                     </form>
                 </section>
+
                 <section style="margin-top: 40px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
                         <h3 style="border:none;"><i class="fas fa-cloud"></i> Archives Cloud</h3>
@@ -85,6 +88,7 @@
                         </tbody>
                     </table>
                 </section>
+
                 <section style="margin-top: 40px;">
                     <h3><i class="fas fa-list-ul"></i> Journal d'Audit</h3>
                     <div class="log-container">
@@ -105,13 +109,17 @@
         {% else %}
             <div class="auth-panel">
                 <form action="/login" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <h3>Identification</h3>
                     <input type="text" name="username" placeholder="Pseudo Opérateur" required>
                     <input type="password" name="password" placeholder="Mot de passe" required>
                     <button type="submit">Accéder au Terminal</button>
                 </form>
+                
                 <div class="neon-text">[ NOUVEAU COMPTE ]</div>
+                
                 <form action="{{ url_for('register') }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="text" name="username" placeholder="Pseudo" required>
                     <input type="password" name="password" placeholder="Mot de passe" required>
                     <input type="password" name="pin" placeholder="PIN 2FA" maxlength="6" required>
@@ -119,11 +127,13 @@
                 </form>
             </div>
         {% endif %}
+
         <section style="margin-top: 50px; padding-top: 20px; border-top: 1px dashed var(--border); color: #8b949e; font-size: 0.85rem;">
             <h3 style="font-size: 0.9rem; border:none;"><i class="fas fa-info-circle"></i> À PROPOS DE DORKNET CRYPTOVAULT</h3>
             <p>Dirigé par le <strong>Dr Enoch Numbi</strong>, ce système déploie une architecture <em>Zero-Knowledge</em> utilisant le chiffrement <strong>AES-256-EAX</strong>.</p>
         </section>
     </div>
+
     <script>
         // LOGIQUE DE CONFIRMATION DE DÉCONNEXION
         function confirmLogout() {
@@ -131,6 +141,7 @@
                 window.location.href = "{{ url_for('logout') }}";
             }
         }
+
         async function encryptFileBeforeUpload(file, userKey) {
             const enc = new TextEncoder();
             const keyMaterial = await window.crypto.subtle.importKey("raw", enc.encode(userKey), {name: "PBKDF2"}, false, ["deriveKey"]);
@@ -140,6 +151,7 @@
             const encryptedContent = await window.crypto.subtle.encrypt({name: "AES-GCM", iv: iv}, key, data);
             return new Blob([iv, new Uint8Array(encryptedContent)], {type: "application/octet-stream"});
         }
+
         const form = document.getElementById('secure-upload-form');
         if(form) {
             form.addEventListener('submit', async (e) => {
@@ -147,14 +159,34 @@
                 const fInput = document.getElementById('file-input');
                 const kInput = document.getElementById('client-pass');
                 const status = document.getElementById('encryption-status');
+                
                 if (fInput.files.length > 0) {
                     status.style.display = 'block';
-                    const blob = await encryptFileBeforeUpload(fInput.files[0], kInput.value);
-                    const formData = new FormData();
-                    formData.append('file', blob, fInput.files[0].name + '.enc');
-                    const response = await fetch('/upload', { method: 'POST', body: formData });
-                    if (response.ok) { window.location.reload(); }
-                    else { alert("Erreur upload"); status.style.display = 'none'; }
+                    try {
+                        const blob = await encryptFileBeforeUpload(fInput.files[0], kInput.value);
+                        const formData = new FormData();
+                        formData.append('file', blob, fInput.files[0].name + '.enc');
+                        
+                        // ENVOI AVEC HEADER CSRF POUR LA SÉCURITÉ TALISMAN/WTF
+                        const response = await fetch('/upload', { 
+                            method: 'POST', 
+                            body: formData,
+                            headers: {
+                                'X-CSRFToken': "{{ csrf_token() }}"
+                            }
+                        });
+
+                        if (response.ok) { 
+                            window.location.reload(); 
+                        } else { 
+                            const errText = await response.text();
+                            alert("Erreur de sécurité ou d'upload : " + errText); 
+                            status.style.display = 'none'; 
+                        }
+                    } catch (err) {
+                        alert("Erreur critique durant le processus de chiffrement.");
+                        status.style.display = 'none';
+                    }
                 }
             });
         }
