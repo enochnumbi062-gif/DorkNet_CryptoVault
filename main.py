@@ -29,7 +29,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# --- PROTECTION CSRF & BOUCLIER HTTP ---
+# --- PROTECTION CSRF & BOUCLIER HTTP (AJOUTÉ) ---
 csrf = CSRFProtect(app)
 csp = {
     'default-src': '\'self\'',
@@ -52,7 +52,7 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-# --- CONFIGURATION GÉNÉRALE ---
+# --- CONFIGURATION GÉNÉRALE & BASE DE DONNÉES ---
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dorknet-cryptovault-secure-key')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'enc'}
@@ -67,15 +67,17 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'index'
 
+# --- ÉTAT DU SYSTÈME (KILL SWITCH) ---
 SYSTEM_ACTIVE = True 
 
-# --- CONFIGURATION CLOUDINARY & MAIL ---
+# --- CONFIGURATION CLOUDINARY ---
 cloudinary.config(
   cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME', '').strip(),
   api_key = os.environ.get('CLOUDINARY_API_KEY', '').strip(),
   api_secret = os.environ.get('CLOUDINARY_API_SECRET', '').strip()
 )
 
+# --- CONFIGURATION EMAIL ---
 app.config.update(
     MAIL_SERVER='smtp.gmail.com',
     MAIL_PORT=587,
@@ -92,8 +94,8 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.Text, nullable=False) 
     pin_code = db.Column(db.Text, nullable=True)
-    failed_attempts = db.Column(db.Integer, default=0)
-    lockout_until = db.Column(db.DateTime, nullable=True)
+    failed_attempts = db.Column(db.Integer, default=0) # Pour le lockout
+    lockout_until = db.Column(db.DateTime, nullable=True) # Pour le lockout
 
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -106,8 +108,7 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- OUTILS DE SÉCURITÉ BAS-NIVEAU ---
-
+# --- OUTILS DE SÉCURITÉ BAS-NIVEAU (MEMORY WIPER) ---
 def wipe_memory(variable):
     if not isinstance(variable, (str, bytes, bytearray)): return False
     location, size = id(variable), sys.getsizeof(variable)
@@ -120,18 +121,18 @@ def wipe_memory(variable):
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# --- DÉCORATEURS & MIDDLEWARE ---
-
+# --- DÉCORATEURS DE SÉCURITÉ AVANCÉE ---
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated or current_user.username != "Enoch_dorknet":
-            session['admin_violation'] = session.get('admin_violation', 0) + 1
-            if session['admin_violation'] >= 3:
-                db.session.add(AuditLog(username="INTRUS", action="BOMBE", details=f"IP: {get_remote_address()}"))
+            session['admin_violation_count'] = session.get('admin_violation_count', 0) + 1
+            if session['admin_violation_count'] >= 3:
+                db.session.add(AuditLog(username="INTRUS", action="BOMBE_DECONNEXION", details=f"IP: {get_remote_address()}"))
                 db.session.commit()
                 logout_user()
                 session.clear()
+                flash("🚨 ALERTE SÉCURITÉ : Session neutralisée.", "danger")
                 return redirect(url_for('index'))
             abort(404) 
         return f(*args, **kwargs)
@@ -140,17 +141,30 @@ def admin_required(f):
 @app.before_request
 def check_kill_switch():
     if not SYSTEM_ACTIVE and request.endpoint not in ['index', 'static', 'login', 'logout', 'register']:
-        return "<h1>⚠️ ACCÈS NEUTRALISÉ</h1>", 503
+        return "<h1>⚠️ ACCÈS NEUTRALISÉ</h1><p>Mode confinement activé.</p>", 503
 
 def send_critical_alert(action, details):
     with app.app_context():
         try:
-            msg = Message(subject=f"🚨 [DORKNET] {action}", recipients=[os.getenv('MAIL_USER')])
+            msg = Message(subject=f"🚨 [DORKNET] ALERTE : {action}", recipients=[os.getenv('MAIL_USER')])
             msg.html = f"<b>Action:</b> {action}<br><b>Détails:</b> {details}"
             mail.send(msg)
-        except: pass
+        except Exception as e: print(f"❌ Erreur mail : {e}")
 
-# --- ROUTES AUTHENTIFICATION (ANTI-EXTRACTION & LOCKOUT) ---
+# --- ROUTES AUTHENTIFICATION (LOCKOUT & ANTI-TIMING) ---
+@app.route('/register', methods=['POST'])
+def register():
+    username = request.form.get('username')
+    password = generate_password_hash(request.form.get('password'))
+    pin = generate_password_hash(request.form.get('pin'))
+    if User.query.filter_by(username=username).first():
+        flash("Utilisateur déjà existant", "danger")
+        return redirect(url_for('index'))
+    new_user = User(username=username, password=password, pin_code=pin)
+    db.session.add(new_user)
+    db.session.commit()
+    flash("Accès généré avec succès !", "success")
+    return redirect(url_for('index'))
 
 @app.route('/login', methods=['POST'])
 @limiter.limit("5 per minute")
@@ -160,21 +174,17 @@ def login():
     user = User.query.filter_by(username=username_input).first()
 
     if not user:
-        time.sleep(1.0)
+        time.sleep(1.0) # Anti-timing
         return abort(401)
 
     if user.lockout_until and user.lockout_until > datetime.now():
-        db.session.add(AuditLog(username=username_input, action="LOCKOUT_HIT", details="Compte scellé."))
-        db.session.commit()
-        return "<h1>COMPTE SCELLÉ</h1>", 403
+        return f"<h1>COMPTE SCELLÉ</h1>", 403
 
     if check_password_hash(user.password, password_input):
         user.failed_attempts = 0
         user.lockout_until = None
         db.session.commit()
-        # Sécurité session
-        old_pending = session.get('pending_user_id')
-        session.clear() 
+        session.clear() # Prévient la fixation de session
         session['pending_user_id'] = user.id
         return redirect(url_for('verify_2fa'))
     else:
@@ -184,41 +194,37 @@ def login():
             send_critical_alert("COMPTE_VERROUILLÉ", username_input)
         db.session.commit()
         time.sleep(0.5)
-        flash('Accès refusé.', "danger")
+        flash('Identifiants invalides.', "danger")
         return redirect(url_for('index'))
 
 @app.route('/verify_2fa', methods=['GET', 'POST'])
 @limiter.limit("5 per 15 minutes")
 def verify_2fa():
-    if 'pending_user_id' not in session: return redirect(url_for('index'))
+    if 'pending_user_id' not in session:
+        return redirect(url_for('index'))
     if request.method == 'POST':
         pin = request.form.get('pin')
         user = User.query.get(session['pending_user_id'])
         if user and check_password_hash(user.pin_code, pin):
             login_user(user)
             session.pop('pending_user_id')
-            db.session.add(AuditLog(username=user.username, action="LOGIN_SUCCESS", details="2FA Validé"))
+            db.session.add(AuditLog(username=user.username, action="LOGIN_SUCCESS", details="Accès validé."))
             db.session.commit()
-            wipe_memory(pin) # Nettoyage RAM
+            wipe_memory(pin) # Efface le code de la RAM
             return redirect(url_for('index'))
         flash("Code PIN incorrect.", "danger")
     return render_template('2fa.html')
 
-@app.route('/register', methods=['POST'])
-def register():
-    username = request.form.get('username')
-    if User.query.filter_by(username=username).first(): return redirect(url_for('index'))
-    new_user = User(
-        username=username, 
-        password=generate_password_hash(request.form.get('password')),
-        pin_code=generate_password_hash(request.form.get('pin'))
-    )
-    db.session.add(new_user)
+@app.route('/logout')
+@login_required
+def logout():
+    db.session.add(AuditLog(username=current_user.username, action="LOGOUT", details="Session terminée."))
     db.session.commit()
+    logout_user()
+    session.clear()
     return redirect(url_for('index'))
 
-# --- ROUTES FICHIERS (DEEP INSPECTION & HONEYPOT) ---
-
+# --- GESTION FICHIERS (DEEP INSPECTION & SECURE FILENAME) ---
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload():
@@ -227,69 +233,92 @@ def upload():
     
     filename = secure_filename(file.filename)
     if allowed_file(filename):
-        file_content = file.read()
-        # Analyse MIME réelle
-        file_type = magic.from_buffer(file_content, mime=True)
-        if any(x in file_type for x in ["python", "executable", "shell"]):
-            db.session.add(AuditLog(username=current_user.username, action="MALWARE_DETECTED", details=filename))
-            db.session.commit()
-            return "🚨 ALERTE : Contenu interdit.", 403
-
         try:
-            cloudinary.uploader.upload(file_content, resource_type="raw", public_id=filename, folder="DorkNet_Vault")
+            file_content = file.read()
+            # Vérification MIME réelle (Magic)
+            file_type = magic.from_buffer(file_content, mime=True)
+            if any(x in file_type for x in ["python", "executable", "shell"]):
+                db.session.add(AuditLog(username=current_user.username, action="MALWARE_DETECTED", details=filename))
+                db.session.commit()
+                return "🚨 ALERTE : Contenu malveillant détecté.", 403
+
+            upload_result = cloudinary.uploader.upload(
+                file_content,
+                resource_type="raw",
+                public_id=filename,
+                folder="DorkNet_Vault",
+                invalidate=True
+            )
             db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=filename))
             db.session.commit()
-            flash('Fichier sécurisé !', "success")
+            flash('Fichier envoyé et analysé !', "success")
         except Exception as e: flash(f"Erreur : {str(e)}", "danger")
     return redirect(url_for('index'))
 
+@app.route('/download_cloud/<path:public_id>')
+@login_required
+def download_cloud(public_id):
+    if "passwords" in public_id.lower():
+        send_critical_alert("HONEYTOKEN_TRIGGERED", f"Par {current_user.username}")
+        abort(403)
+    try:
+        res = cloudinary.api.resource(public_id, resource_type="raw")
+        response = requests.get(res['secure_url'])
+        return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
+    except Exception as e: return redirect(url_for('index'))
+
+# --- ROUTES ADMIN (HONEYPOT & ANALYSE) ---
 @app.route('/admin/config_backup')
 def honeypot_trap():
-    send_critical_alert("HONEYPOT_CRITIQUE", f"IP: {get_remote_address()}")
+    send_critical_alert("HONEYPOT_CRITIQUE", f"L'IP {get_remote_address()} a tenté un accès direct.")
     return abort(404)
 
-# --- INTEGRITY SENTINEL (S'exécute en tâche de fond) ---
-
-def start_integrity_sentinel():
-    critical_files = ['main.py', '.env']
-    ref_hash = hashlib.sha256()
-    for f in critical_files:
-        if os.path.exists(f):
-            with open(f, "rb") as file: ref_hash.update(file.read())
-    reference = ref_hash.hexdigest()
-    
-    while True:
-        time.sleep(60)
-        check = hashlib.sha256()
-        for f in critical_files:
-            if os.path.exists(f):
-                with open(f, "rb") as file: check.update(file.read())
-        if check.hexdigest() != reference:
-            print("🚨 VIOLATION D'INTÉGRITÉ !")
-            # Déclencher ici une alerte mail ou arrêt
-
-# --- ROUTES ADMIN & INDEX (CONSERVÉES) ---
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    session.clear()
-    return redirect(url_for('index'))
-
 @app.route('/admin/logs')
+@limiter.limit("3 per day")
+@login_required
 @admin_required
 def admin_logs():
     all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
     return render_template('admin_logs.html', logs=all_logs)
 
+@app.route('/admin/export_logs')
+@login_required
+@admin_required
+def export_logs():
+    all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID', 'Timestamp', 'Operateur', 'Action', 'Details'])
+    for log in all_logs:
+        writer.writerow([log.id, log.timestamp, log.username, log.action, log.details])
+    output.seek(0)
+    return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name="DorkNet_Audit.csv")
+
 @app.route('/admin/killswitch', methods=['POST'])
+@login_required
 @admin_required
 def trigger_kill_switch():
     global SYSTEM_ACTIVE
     SYSTEM_ACTIVE = False
+    send_critical_alert("KILL_SWITCH_ACTIVATED", f"Par {current_user.username}")
     return redirect(url_for('admin_logs'))
 
+# --- SENTINELLE D'INTÉGRITÉ ---
+def start_integrity_sentinel():
+    critical_files = ['main.py', '.env']
+    reference = ""
+    while True:
+        check = hashlib.sha256()
+        for f in critical_files:
+            if os.path.exists(f):
+                with open(f, "rb") as file: check.update(file.read())
+        current_hash = check.hexdigest()
+        if not reference: reference = current_hash
+        elif current_hash != reference:
+            print("🚨 VIOLATION D'INTÉGRITÉ !")
+        time.sleep(60)
+
+# --- ROUTE PRINCIPALE ---
 @app.route('/')
 def index():
     cloud_files = []
@@ -298,12 +327,14 @@ def index():
             res = cloudinary.api.resources(resource_type="raw")
             if 'resources' in res:
                 cloud_files = [{'public_id': r['public_id'], 'size': f"{r['bytes']/1024:.1f} KB"} for r in res['resources']]
-        except: pass
+        except Exception as e: print(f"Erreur : {e}")
+            
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
 
 if __name__ == '__main__':
-    with app.app_context(): db.create_all()
-    # Lancement de la sentinelle dans un thread séparé
+    with app.app_context():
+        db.create_all()
     threading.Thread(target=start_integrity_sentinel, daemon=True).start()
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
