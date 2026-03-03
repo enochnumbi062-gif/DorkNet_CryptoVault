@@ -38,7 +38,7 @@ csp = {
     'style-src': [
         '\'self\'',
         'https://cdn.jsdelivr.net',
-        '\'unsafe-inline\'' # Nécessaire pour vos styles néons personnalisés
+        '\'unsafe-inline\'' 
     ]
 }
 
@@ -114,8 +114,7 @@ class AuditLog(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- UTILITAIRES DE SÉCURITÉ CHIRURGICALE (MEMORY WIPER) ---
-
+# --- MÉMOIRE VIVE : PROTOCOLE D'EFFACEMENT ---
 def wipe_memory(variable):
     if not isinstance(variable, (str, bytes, bytearray)):
         return False
@@ -130,7 +129,6 @@ def wipe_memory(variable):
         return False
 
 # --- DÉCORATEURS ---
-
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -166,8 +164,7 @@ def send_critical_alert(action, details):
             mail.send(msg)
         except Exception as e: print(f"❌ Erreur mail : {e}")
 
-# --- ROUTES AUTHENTIFICATION (LOGIN SÉCURISÉ) ---
-
+# --- ROUTES AUTHENTIFICATION ---
 @app.route('/register', methods=['POST'])
 def register():
     username = request.form.get('username')
@@ -187,23 +184,15 @@ def register():
 def login():
     username_input = request.form.get('username')
     password_input = request.form.get('password')
-    
-    # Défense Temporelle (Anti-Timing Attack)
-    time.sleep(0.5) 
-
+    time.sleep(0.5) # Anti-Timing Attack
     user = User.query.filter_by(username=username_input).first()
-    
     if user and check_password_hash(user.password, password_input):
         session['pending_user_id'] = user.id
         return redirect(url_for('verify_2fa'))
-    
     db.session.add(AuditLog(username=username_input or "INCONNU", action="LOGIN_FAILED", details="Tentative rejetée."))
     db.session.commit()
     flash('Accès refusé par le protocole.', "danger")
-    
-    # Nettoyage mémoire RAM immédiat
     wipe_memory(password_input)
-    
     return redirect(url_for('index'))
 
 @app.route('/verify_2fa', methods=['GET', 'POST'])
@@ -218,13 +207,21 @@ def verify_2fa():
             session.pop('pending_user_id')
             db.session.add(AuditLog(username=user.username, action="LOGIN_SUCCESS", details="Bastion validé."))
             db.session.commit()
-            wipe_memory(pin) # Nettoyage RAM
+            wipe_memory(pin)
             return redirect(url_for('index'))
         flash("Code PIN incorrect.", "danger")
     return render_template('2fa.html')
 
-# --- GESTION FICHIERS (DPI & ANTI-MALWARE) ---
+@app.route('/logout')
+@login_required
+def logout():
+    db.session.add(AuditLog(username=current_user.username, action="LOGOUT", details="Session terminée."))
+    db.session.commit()
+    logout_user()
+    session.clear()
+    return redirect(url_for('index'))
 
+# --- GESTION FICHIERS (DPI & ANTI-MALWARE) ---
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -234,48 +231,53 @@ def upload():
     if 'file' not in request.files: return redirect(url_for('index'))
     file = request.files['file']
     if file.filename == '': return redirect(url_for('index'))
-
-    # Nettoyage du nom (Anti-Path Traversal)
     filename = secure_filename(file.filename)
-    
     if file and allowed_file(filename):
         file_content = file.read()
-        
-        # Deep Packet Inspection (Type MIME réel)
         file_type = magic.from_buffer(file_content, mime=True)
         if any(x in file_type for x in ["python", "executable", "shell"]):
             db.session.add(AuditLog(username=current_user.username, action="MALWARE_DETECTED", details=f"Fichier bloqué : {filename}"))
             db.session.commit()
             return "🚨 ALERTE : Contenu malveillant détecté.", 403
-
         try:
-            cloudinary.uploader.upload(
-                file_content,
-                resource_type="raw",
-                public_id=filename,
-                folder="DorkNet_Vault",
-                invalidate=True
-            )
+            cloudinary.uploader.upload(file_content, resource_type="raw", public_id=filename, folder="DorkNet_Vault", invalidate=True)
             db.session.add(AuditLog(username=current_user.username, action="UPLOAD", details=filename))
             db.session.commit()
             flash('Fichier analysé et sécurisé !', "success")
         except Exception as e: flash(f"Erreur Cloud : {str(e)}", "danger")
-        finally:
-            wipe_memory(file_content) # Vaporisation de la RAM
-    else:
-        return "Type de fichier non autorisé.", 400
-        
+        finally: wipe_memory(file_content)
     return redirect(url_for('index'))
 
-# --- ROUTES ADMIN ---
+@app.route('/download_cloud/<path:public_id>')
+@login_required
+def download_cloud(public_id):
+    try:
+        res = cloudinary.api.resource(public_id, resource_type="raw")
+        response = requests.get(res['secure_url'])
+        return send_file(io.BytesIO(response.content), as_attachment=True, download_name=public_id)
+    except Exception as e: return redirect(url_for('index'))
 
+# --- ADMINISTRATION ---
 @app.route('/admin/logs')
-@limiter.limit("3 per day", error_message="🚫 IP BANNIE 24H")
+@limiter.limit("3 per day")
 @login_required
 @admin_required
 def admin_logs():
     all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
     return render_template('admin_logs.html', logs=all_logs)
+
+@app.route('/admin/export_logs')
+@login_required
+@admin_required
+def export_logs():
+    all_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).all()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID', 'Timestamp', 'Operateur', 'Action', 'Details'])
+    for log in all_logs:
+        writer.writerow([log.id, log.timestamp, log.username, log.action, log.details])
+    output.seek(0)
+    return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name="DorkNet_Audit.csv")
 
 @app.route('/admin/killswitch', methods=['POST'])
 @login_required
@@ -298,8 +300,9 @@ def index():
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(10).all() if current_user.is_authenticated else []
     return render_template('index.html', files=cloud_files, logs=logs)
 
-if __name__ == '__main__':
+# --- DÉMARRAGE AVEC DÉTECTION DE PORT RENDER ---
+if __name__ == "__main__":
     with app.app_context():
         db.create_all()
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
